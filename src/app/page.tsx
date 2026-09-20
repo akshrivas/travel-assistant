@@ -31,6 +31,9 @@ export default async function Home() {
         profile.displayName || user?.name || session.email.split("@")[0] || "Traveller"
       }
       knowledgeConfidence={profile.knowledgeConfidence ?? 0.2}
+      partyType={profile.partyType}
+      homeLocation={profile.homeLocation}
+      preferredDestinations={profile.preferredDestinations}
     />
   );
 }
