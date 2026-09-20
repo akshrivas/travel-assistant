@@ -33,9 +33,11 @@ export function detectConversationKind(text: string): ConversationKind {
 
   // Small talk / gratitude / greetings without trip content
   const hasTravelSignal =
-    /\b(trip|travel|holiday|vacation|jaana|ghumna|plan|destination|hotel|stay|flight|budget|days?|din|nights?|goa|kashmir|kerala|manali|shimla|rajasthan|ladakh|andaman|beach|pahad|honeymoon|family trip|weekend)\b/i.test(
+    /\b(trip|travel|holiday|vacation|jaana|ghumna|plan|destination|hotel|stay|flight|budget|days?|din|nights?|goa|kashmir|kerala|manali|shimla|rajasthan|ladakh|andaman|beach|samundar|samundar|pahad|honeymoon|family trip|weekend)\b/i.test(
       lower,
-    ) || /\d+\s*k\b/.test(lower);
+    ) ||
+    /samundar|beach|pahad|ghumna|jaana|trip/i.test(lower) ||
+    /\d+\s*k\b/.test(lower);
 
   if (
     !hasTravelSignal &&

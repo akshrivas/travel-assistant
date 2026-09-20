@@ -147,6 +147,9 @@ export function AssistantChat({
   const [input, setInput] = useState("");
   const [conversationId, setConversationId] = useState<string | undefined>();
   const [travelRequestId, setTravelRequestId] = useState<string | undefined>();
+  const [priorBrief, setPriorBrief] = useState<Record<string, unknown> | null>(
+    null,
+  );
   const [pending, startTransition] = useTransition();
   const [enquireMsg, setEnquireMsg] = useState<string | null>(null);
   const [aiOn, setAiOn] = useState<boolean | null>(null);
@@ -186,7 +189,11 @@ export function AssistantChat({
         const res = await fetch("/api/assistant", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message: trimmed, conversationId }),
+          body: JSON.stringify({
+            message: trimmed,
+            conversationId,
+            priorBrief,
+          }),
         });
         const data = await res.json();
         if (!res.ok) {
@@ -195,13 +202,15 @@ export function AssistantChat({
             {
               id: `e-${Date.now()}`,
               role: "assistant",
-              content: data.detail || data.error || "Something went wrong.",
+              content:
+                "Something went wrong on my side — try that again in a moment.",
             },
           ]);
           return;
         }
         setConversationId(data.conversationId);
-        setTravelRequestId(data.travelRequestId);
+        if (data.travelRequestId) setTravelRequestId(data.travelRequestId);
+        if (data.brief) setPriorBrief(data.brief);
         setMessages((m) => [
           ...m,
           {

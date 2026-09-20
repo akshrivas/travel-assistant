@@ -4,14 +4,43 @@ import { requireUser } from "@/lib/auth/require-user";
 import { toProfileView } from "@/lib/profile";
 import { runAssistantTurn } from "@/lib/engine/assistant";
 import { prisma } from "@/lib/db";
+import {
+  ensureConversation,
+  ensureDbUser,
+  safePersist,
+} from "@/lib/db/ensure";
 import type { TravelEnquiryBrief } from "@/lib/types/travel";
 
 /** Live web search can exceed default serverless limits */
 export const maxDuration = 60;
 
+const briefSchema = z
+  .object({
+    intent: z.string().optional().nullable(),
+    destination: z.string().optional().nullable(),
+    datesText: z.string().optional().nullable(),
+    durationDays: z.number().optional().nullable(),
+    travellers: z.number().optional().nullable(),
+    partyType: z.string().optional().nullable(),
+    budgetMin: z.number().optional().nullable(),
+    budgetMax: z.number().optional().nullable(),
+    budgetCurrency: z.string().optional().nullable(),
+    travelStyle: z.string().optional().nullable(),
+    preferences: z.record(z.string(), z.unknown()).optional().nullable(),
+    constraints: z.record(z.string(), z.unknown()).optional().nullable(),
+    temporary: z.record(z.string(), z.unknown()).optional().nullable(),
+    confidence: z.number().optional().nullable(),
+    missingInformation: z.array(z.string()).optional().nullable(),
+    rawText: z.string().optional().nullable(),
+  })
+  .optional()
+  .nullable();
+
 const bodySchema = z.object({
   message: z.string().min(1).max(4000),
   conversationId: z.string().optional(),
+  /** Client-held brief — survives ephemeral Vercel SQLite cold starts */
+  priorBrief: briefSchema,
 });
 
 function briefFromRequest(priorReq: {
@@ -52,10 +81,34 @@ function briefFromRequest(priorReq: {
   };
 }
 
+function briefFromClient(
+  raw: z.infer<typeof briefSchema>,
+): TravelEnquiryBrief | null {
+  if (!raw) return null;
+  return {
+    intent: raw.intent ?? undefined,
+    destination: raw.destination ?? undefined,
+    datesText: raw.datesText ?? undefined,
+    durationDays: raw.durationDays ?? undefined,
+    travellers: raw.travellers ?? undefined,
+    partyType: raw.partyType ?? undefined,
+    budgetMin: raw.budgetMin ?? undefined,
+    budgetMax: raw.budgetMax ?? undefined,
+    budgetCurrency: raw.budgetCurrency ?? "INR",
+    travelStyle: raw.travelStyle ?? undefined,
+    preferences: (raw.preferences as Record<string, unknown>) || {},
+    constraints: (raw.constraints as Record<string, unknown>) || {},
+    temporary: (raw.temporary as Record<string, unknown>) || {},
+    confidence: raw.confidence ?? 0,
+    missingInformation: raw.missingInformation ?? [],
+    rawText: raw.rawText ?? undefined,
+  };
+}
+
 export async function POST(req: Request) {
   try {
-    const user = await requireUser();
-    if (!user?.profile) {
+    const sessionUser = await requireUser({ allowSetCookie: true });
+    if (!sessionUser?.profile || !sessionUser.email) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -68,32 +121,62 @@ export async function POST(req: Request) {
       );
     }
 
-    const profile = toProfileView(user.profile);
-
-    let conversationId = parsed.data.conversationId;
-    if (!conversationId) {
-      const conv = await prisma.conversation.create({
-        data: { userId: user.id, title: "Trip chat" },
-      });
-      conversationId = conv.id;
-    }
-
-    await prisma.message.create({
-      data: {
-        conversationId,
-        role: "user",
-        content: parsed.data.message,
-      },
+    // Make sure User row exists on this ephemeral DB instance
+    const dbUser = await ensureDbUser({
+      id: sessionUser.id,
+      email: sessionUser.email,
+      name: sessionUser.name,
+      profile: sessionUser.profile
+        ? {
+            displayName: sessionUser.profile.displayName,
+            homeLocation: sessionUser.profile.homeLocation,
+            preferredLanguage: sessionUser.profile.preferredLanguage,
+            partyType: sessionUser.profile.partyType,
+            typicalDuration: sessionUser.profile.typicalDuration,
+            budgetMin: sessionUser.profile.budgetMin,
+            budgetMax: sessionUser.profile.budgetMax,
+            budgetCurrency: sessionUser.profile.budgetCurrency,
+            preferredDestinations:
+              sessionUser.profile.preferredDestinations ?? "[]",
+            preferencesJson: sessionUser.profile.preferencesJson,
+            avoidancesJson: sessionUser.profile.avoidancesJson,
+            knowledgeConfidence: sessionUser.profile.knowledgeConfidence,
+            onboardingComplete: sessionUser.profile.onboardingComplete,
+          }
+        : null,
     });
 
-    const priorReq = await prisma.travelRequest.findFirst({
-      where: { conversationId, status: { in: ["open", "shortlisted"] } },
-      orderBy: { updatedAt: "desc" },
-    });
+    const profile = toProfileView(dbUser.profile ?? sessionUser.profile);
+
+    let conversationId = await ensureConversation(
+      dbUser.id,
+      parsed.data.conversationId,
+    );
+
+    await safePersist("user-message", () =>
+      prisma.message.create({
+        data: {
+          conversationId,
+          role: "user",
+          content: parsed.data.message,
+        },
+      }),
+    );
+
+    const priorReq = await safePersist("load-prior", () =>
+      prisma.travelRequest.findFirst({
+        where: { conversationId, status: { in: ["open", "shortlisted"] } },
+        orderBy: { updatedAt: "desc" },
+      }),
+    );
+
+    const priorBrief =
+      (priorReq ? briefFromRequest(priorReq) : null) ||
+      briefFromClient(parsed.data.priorBrief);
 
     const result = await runAssistantTurn({
       message: parsed.data.message,
-      priorBrief: priorReq ? briefFromRequest(priorReq) : null,
+      priorBrief,
       profile,
     });
 
@@ -117,101 +200,124 @@ export async function POST(req: Request) {
       status: result.stage === "shortlist" ? "shortlisted" : "open",
     };
 
-    const request = priorReq
-      ? await prisma.travelRequest.update({
+    let travelRequestId: string | undefined = priorReq?.id;
+
+    const request = await safePersist("travel-request", async () => {
+      // Re-ensure conversation in case /tmp flipped mid-request (rare)
+      conversationId = await ensureConversation(dbUser.id, conversationId);
+      if (priorReq?.id) {
+        const stillThere = await prisma.travelRequest.findUnique({
           where: { id: priorReq.id },
-          data: requestData,
-        })
-      : await prisma.travelRequest.create({
-          data: {
-            userId: user.id,
-            conversationId,
-            ...requestData,
-          },
         });
-
-    if (result.shortlist.length) {
-      await prisma.recommendation.create({
+        if (stillThere) {
+          return prisma.travelRequest.update({
+            where: { id: priorReq.id },
+            data: requestData,
+          });
+        }
+      }
+      return prisma.travelRequest.create({
         data: {
-          travelRequestId: request.id,
-          optionsJson: JSON.stringify(result.shortlist.map((s) => s.option)),
-          reasonsJson: JSON.stringify(
-            result.shortlist.map((s) => ({
-              id: s.option.id,
-              score: s.score,
-              reason: s.reason,
-              label: s.label,
-            })),
-          ),
+          userId: dbUser.id,
+          conversationId,
+          ...requestData,
         },
       });
-
-      await prisma.behaviourSignal.create({
-        data: {
-          userId: user.id,
-          type: "search",
-          payloadJson: JSON.stringify({
-            destination: result.brief.destination,
-            count: result.shortlist.length,
-          }),
-        },
-      });
-    }
-
-    await prisma.message.create({
-      data: {
-        conversationId,
-        role: "assistant",
-        content: result.reply,
-        metadataJson: JSON.stringify({
-          stage: result.stage,
-          shortlist: result.shortlist,
-          brief: result.brief,
-          usedAi: result.usedAi,
-        }),
-      },
     });
 
-    // US-018 safe learning: only apply explicit long-term hints from AI
-    if (result.longTermPreferenceHints && user.profile) {
-      const hints = result.longTermPreferenceHints;
-      const prefs = {
-        ...JSON.parse(user.profile.preferencesJson || "{}"),
-      } as Record<string, unknown>;
-      const avoids = {
-        ...JSON.parse(user.profile.avoidancesJson || "{}"),
-      } as Record<string, unknown>;
+    if (request) travelRequestId = request.id;
 
-      if (hints.pace) prefs.pace = hints.pace;
-      if (hints.hotel) prefs.hotel = hints.hotel;
-      if (hints.interests?.length) {
-        const prev = Array.isArray(prefs.interests)
-          ? (prefs.interests as string[])
-          : [];
-        prefs.interests = [...new Set([...prev, ...hints.interests])];
-      }
-      if (hints.avoidances?.length) {
-        for (const a of hints.avoidances) avoids[a] = true;
-      }
+    if (result.shortlist.length && request) {
+      await safePersist("recommendation", () =>
+        prisma.recommendation.create({
+          data: {
+            travelRequestId: request.id,
+            optionsJson: JSON.stringify(
+              result.shortlist.map((s) => s.option),
+            ),
+            reasonsJson: JSON.stringify(
+              result.shortlist.map((s) => ({
+                id: s.option.id,
+                score: s.score,
+                reason: s.reason,
+                label: s.label,
+              })),
+            ),
+          },
+        }),
+      );
 
-      await prisma.profile.update({
-        where: { userId: user.id },
+      await safePersist("signal", () =>
+        prisma.behaviourSignal.create({
+          data: {
+            userId: dbUser.id,
+            type: "search",
+            payloadJson: JSON.stringify({
+              destination: result.brief.destination,
+              count: result.shortlist.length,
+            }),
+          },
+        }),
+      );
+    }
+
+    await safePersist("assistant-message", () =>
+      prisma.message.create({
         data: {
-          partyType: hints.partyType || user.profile.partyType,
-          preferencesJson: JSON.stringify(prefs),
-          avoidancesJson: JSON.stringify(avoids),
-          knowledgeConfidence: Math.min(
-            0.95,
-            (user.profile.knowledgeConfidence || 0.2) + 0.05,
-          ),
+          conversationId,
+          role: "assistant",
+          content: result.reply,
+          metadataJson: JSON.stringify({
+            stage: result.stage,
+            shortlist: result.shortlist,
+            brief: result.brief,
+            usedAi: result.usedAi,
+          }),
         },
+      }),
+    );
+
+    if (result.longTermPreferenceHints && dbUser.profile) {
+      await safePersist("profile-learn", async () => {
+        const hints = result.longTermPreferenceHints!;
+        const prefs = {
+          ...JSON.parse(dbUser.profile!.preferencesJson || "{}"),
+        } as Record<string, unknown>;
+        const avoids = {
+          ...JSON.parse(dbUser.profile!.avoidancesJson || "{}"),
+        } as Record<string, unknown>;
+
+        if (hints.pace) prefs.pace = hints.pace;
+        if (hints.hotel) prefs.hotel = hints.hotel;
+        if (hints.interests?.length) {
+          const prev = Array.isArray(prefs.interests)
+            ? (prefs.interests as string[])
+            : [];
+          prefs.interests = [...new Set([...prev, ...hints.interests])];
+        }
+        if (hints.avoidances?.length) {
+          for (const a of hints.avoidances) avoids[a] = true;
+        }
+
+        return prisma.profile.update({
+          where: { userId: dbUser.id },
+          data: {
+            partyType: hints.partyType || dbUser.profile!.partyType,
+            preferencesJson: JSON.stringify(prefs),
+            avoidancesJson: JSON.stringify(avoids),
+            knowledgeConfidence: Math.min(
+              0.95,
+              (dbUser.profile!.knowledgeConfidence || 0.2) + 0.05,
+            ),
+          },
+        });
       });
     }
 
     return NextResponse.json({
       conversationId,
-      travelRequestId: request.id,
-      userId: user.id,
+      travelRequestId: travelRequestId || null,
+      userId: dbUser.id,
       aiEnabled: result.usedAi,
       ...result,
     });
