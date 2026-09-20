@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { defaultModel, getOpenAI, isAiEnabled } from "@/lib/ai/client";
 import {
+  detectConversationKind,
   mergeBriefs,
   understandTravelEnquiry,
 } from "@/lib/engine/understand";
@@ -10,6 +11,10 @@ import type {
 } from "@/lib/types/travel";
 
 const briefSchema = z.object({
+  conversationKind: z
+    .enum(["travel_plan", "chat", "profile", "meta"])
+    .optional()
+    .nullable(),
   intent: z.string().optional().nullable(),
   destination: z.string().optional().nullable(),
   datesText: z.string().optional().nullable(),
@@ -28,7 +33,6 @@ const briefSchema = z.object({
   temporary: z.record(z.string(), z.unknown()).optional().nullable(),
   confidence: z.number().min(0).max(1),
   missingInformation: z.array(z.string()),
-  /** Long-term preference hints only if user implied lasting preference */
   longTermPreferenceHints: z
     .object({
       partyType: z.string().optional().nullable(),
@@ -43,6 +47,7 @@ const briefSchema = z.object({
 
 export type AiUnderstandResult = {
   brief: TravelEnquiryBrief;
+  conversationKind: "travel_plan" | "chat" | "profile" | "meta";
   longTermPreferenceHints?: z.infer<
     typeof briefSchema
   >["longTermPreferenceHints"];
@@ -58,6 +63,7 @@ export async function understandWithAi(input: {
   priorBrief?: TravelEnquiryBrief | null;
   profile?: CustomerProfileView | null;
 }): Promise<AiUnderstandResult> {
+  const ruleKind = detectConversationKind(input.message);
   const fallback = (() => {
     const extracted = understandTravelEnquiry(
       input.message,
@@ -66,7 +72,10 @@ export async function understandWithAi(input: {
     const brief = input.priorBrief
       ? mergeBriefs(input.priorBrief, extracted)
       : extracted;
-    return { brief, usedAi: false as const };
+    const kind =
+      (extracted.preferences?.conversationKind as AiUnderstandResult["conversationKind"]) ||
+      ruleKind;
+    return { brief, conversationKind: kind, usedAi: false as const };
   })();
 
   const openai = getOpenAI();
@@ -74,20 +83,27 @@ export async function understandWithAi(input: {
 
   try {
     const profile = input.profile;
-    const system = `You are the understanding layer of a Personal Travel Assistant for India trips.
-Extract a structured travel brief from the user message.
-Rules:
+    const system = `You are the understanding layer of a Personal Travel Assistant (India).
+First classify conversationKind, THEN extract a travel brief only if relevant.
+
+conversationKind:
+- travel_plan — user is planning / refining a trip (destination, dates, budget, stays…)
+- profile — asking about their name, prefs, what you remember about them
+- meta — asking what you are / how you work
+- chat — greetings, thanks, jokes, general talk, identity questions that aren't trip planning
+
+Critical rules:
+- If conversationKind is NOT travel_plan: set confidence=0, missingInformation=[], do NOT invent destination/duration/budget needs.
 - Prefer English field values.
 - Budget numbers in INR absolute amounts (60000 not 60).
-- If user says a one-off budget ("this time", "is baar", "for this trip"), put budget in temporary AND budgetMin/Max, do NOT treat as permanent.
-- Only fill longTermPreferenceHints when user clearly states lasting preferences ("I usually...", "we always prefer...").
-- missingInformation: only fields truly needed to search well: destination, duration, budget, travellers/party.
-- confidence 0-1 reflecting how complete the brief is.
+- One-off budget ("this time", "is baar") → temporary + budgetMin/Max.
+- longTermPreferenceHints only for lasting prefs ("I usually…").
 - Do not invent destinations the user didn't imply.
-Return JSON only matching the schema.`;
+Return JSON only.`;
 
     const userPayload = {
       message: input.message,
+      heuristicKind: ruleKind,
       priorBrief: input.priorBrief ?? null,
       customerProfile: profile
         ? {
@@ -107,7 +123,7 @@ Return JSON only matching the schema.`;
 
     const completion = await openai.chat.completions.create({
       model: defaultModel(),
-      temperature: 0.2,
+      temperature: 0.15,
       response_format: { type: "json_object" },
       messages: [
         { role: "system", content: system },
@@ -120,8 +136,39 @@ Return JSON only matching the schema.`;
     if (!parsed.success) return fallback;
 
     const d = parsed.data;
+    // Prefer heuristic when it clearly says non-travel — don't let model force trip funnel
+    const conversationKind: AiUnderstandResult["conversationKind"] =
+      ruleKind !== "travel_plan"
+        ? ruleKind
+        : d.conversationKind || ruleKind;
+
+    if (conversationKind !== "travel_plan") {
+      const brief = input.priorBrief
+        ? mergeBriefs(input.priorBrief, {
+            intent: conversationKind,
+            confidence: 0,
+            missingInformation: [],
+            preferences: { conversationKind },
+            rawText: input.message,
+          })
+        : {
+            intent: conversationKind,
+            confidence: 0,
+            missingInformation: [],
+            preferences: { conversationKind },
+            budgetCurrency: "INR",
+            rawText: input.message,
+          };
+      return {
+        brief,
+        conversationKind,
+        longTermPreferenceHints: undefined,
+        usedAi: true,
+      };
+    }
+
     const aiBrief: TravelEnquiryBrief = {
-      intent: d.intent ?? undefined,
+      intent: d.intent ?? "leisure_trip",
       destination: d.destination ?? undefined,
       datesText: d.datesText ?? undefined,
       durationDays: d.durationDays ?? undefined,
@@ -131,7 +178,10 @@ Return JSON only matching the schema.`;
       budgetMax: d.budgetMax ?? undefined,
       budgetCurrency: d.budgetCurrency ?? "INR",
       travelStyle: d.travelStyle ?? undefined,
-      preferences: d.preferences ?? {},
+      preferences: {
+        ...(d.preferences ?? {}),
+        conversationKind: "travel_plan",
+      },
       constraints: d.constraints ?? {},
       temporary: d.temporary ?? {},
       confidence: d.confidence,
@@ -139,7 +189,6 @@ Return JSON only matching the schema.`;
       rawText: input.message,
     };
 
-    // Fill gaps from profile when user omitted known defaults (not temporary)
     if (!aiBrief.partyType && profile?.partyType) {
       aiBrief.partyType = profile.partyType;
     }
@@ -147,16 +196,14 @@ Return JSON only matching the schema.`;
       aiBrief.budgetMax == null &&
       aiBrief.budgetMin == null &&
       !aiBrief.temporary?.budgetMax &&
-      profile?.budgetMax
+      profile?.budgetMax &&
+      (profile.knowledgeConfidence ?? 0) >= 0.45
     ) {
-      // Suggest using usual budget — mark soft, still ask if confidence low
-      if ((profile.knowledgeConfidence ?? 0) >= 0.45) {
-        aiBrief.budgetMin = profile.budgetMin ?? undefined;
-        aiBrief.budgetMax = profile.budgetMax ?? undefined;
-        aiBrief.missingInformation = (aiBrief.missingInformation || []).filter(
-          (m) => m !== "budget",
-        );
-      }
+      aiBrief.budgetMin = profile.budgetMin ?? undefined;
+      aiBrief.budgetMax = profile.budgetMax ?? undefined;
+      aiBrief.missingInformation = (aiBrief.missingInformation || []).filter(
+        (m) => m !== "budget",
+      );
     }
 
     const brief = input.priorBrief
@@ -165,6 +212,7 @@ Return JSON only matching the schema.`;
 
     return {
       brief,
+      conversationKind: "travel_plan",
       longTermPreferenceHints: d.longTermPreferenceHints ?? undefined,
       usedAi: true,
     };

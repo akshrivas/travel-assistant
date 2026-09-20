@@ -7,41 +7,42 @@ import type {
 } from "@/lib/types/travel";
 
 export async function craftAssistantReply(input: {
-  stage: "clarify" | "shortlist" | "empty";
+  stage: "clarify" | "shortlist" | "empty" | "chat";
   brief: TravelEnquiryBrief;
   profile: CustomerProfileView;
   missing?: string[];
   shortlist?: RankedOption[];
   totalFound?: number;
+  userMessage?: string;
+  conversationKind?: "travel_plan" | "chat" | "profile" | "meta";
   fallback: string;
 }): Promise<string> {
   const openai = getOpenAI();
   if (!isAiEnabled() || !openai) return input.fallback;
 
   try {
-    const system = `You are a sharp Personal Travel Assistant for India trips.
-Tone: natural chat with a knowledgeable friend who actually compared the live market — not a call-center script, not a brochure.
+    const system = `You are TripSaathi — a sharp personal travel companion for India.
+Tone: natural chat with a smart friend. Not a call-center script. Not a brochure.
 
-Critical style rules:
-- NEVER open with "Hi {name}", "Hey {name}", or "{name}," on mid-flow turns.
-- Do NOT use the customer's first name unless they just introduced themselves or it adds clear warmth once in a long thread. Default: zero name usage.
-- Be specific to THIS trip + THEIR prefs (party, pace, budget, avoidances) without name-dropping.
+Core behaviour:
+- Answer the user's ACTUAL message. Do not force trip planning.
+- If they ask their name, prefs, or what you remember — answer from customer profile. Be specific.
+- If they greet or make small talk — respond warmly in 1–2 sentences. You may lightly invite a trip idea, but never demand destination/duration/budget.
+- Only ask trip-clarifying questions when stage is clarify AND they are clearly planning a trip.
 - Never invent hotels/prices/operators — only use provided shortlist data.
-- Prefer concrete comparisons: rating/reviews, platform, budget fit, vibe match.
-- Keep clarify asks to max 2 questions. No fluff.
-- Shortlist intro: 2–4 sentences on why these fit, then stop (cards show details). Max ~90 words.
-- Mention that prices/availability should be confirmed on the source link.
-- English. Light **bold** ok. No emojis.`;
+- Do NOT open with "Hi {name}" every turn. Use their name only when they asked about it, or once for warmth if natural.
+- English. Light **bold** ok. No emojis. Keep chat replies under ~60 words unless shortlist.`;
 
     const payload = {
       stage: input.stage,
-      // Name available but model should almost never use it
-      customerFirstName: input.profile.displayName || null,
-      useName: false,
+      conversationKind: input.conversationKind || "travel_plan",
+      userMessage: input.userMessage,
       customer: {
+        displayName: input.profile.displayName || null,
         home: input.profile.homeLocation,
         partyType: input.profile.partyType,
         usualBudget: [input.profile.budgetMin, input.profile.budgetMax],
+        preferredDestinations: input.profile.preferredDestinations,
         preferences: input.profile.preferences,
         avoidances: input.profile.avoidances,
         knowledgeConfidence: input.profile.knowledgeConfidence,
@@ -67,19 +68,23 @@ Critical style rules:
 
     const completion = await openai.chat.completions.create({
       model: defaultModel(),
-      temperature: 0.5,
-      max_tokens: 280,
+      temperature: input.stage === "chat" ? 0.6 : 0.45,
+      max_tokens: input.stage === "chat" ? 160 : 280,
       messages: [
         { role: "system", content: system },
         {
           role: "user",
-          content: `Write the next assistant message only (no preamble). Do not address the user by name:\n${JSON.stringify(payload)}`,
+          content: `Write the next assistant message only (no preamble):\n${JSON.stringify(payload)}`,
         },
       ],
     });
 
     const text = completion.choices[0]?.message?.content?.trim();
     if (!text) return input.fallback;
+    // Only strip greeting spam on travel turns — name answers need the name
+    if (input.stage === "chat" && input.conversationKind === "profile") {
+      return text;
+    }
     return stripNameSpam(text, input.profile.displayName);
   } catch (err) {
     console.error("AI reply failed", err);
@@ -87,7 +92,6 @@ Critical style rules:
   }
 }
 
-/** Soft guard if the model still greets by name mid-flow */
 function stripNameSpam(text: string, displayName?: string | null): string {
   if (!displayName) return text;
   const name = displayName.trim();

@@ -13,10 +13,10 @@ export type AssistantTurnResult = {
   reply: string;
   brief: TravelEnquiryBrief;
   shortlist: RankedOption[];
-  stage: "clarify" | "shortlist" | "empty" | "out_of_market";
+  stage: "clarify" | "shortlist" | "empty" | "out_of_market" | "chat";
   profileConfidence: number;
   usedAi: boolean;
-  /** Safe long-term hints only — caller may merge carefully into profile */
+  conversationKind?: "travel_plan" | "chat" | "profile" | "meta";
   longTermPreferenceHints?: {
     partyType?: string | null;
     pace?: string | null;
@@ -34,7 +34,8 @@ const emptyProfile = (): CustomerProfileView => ({
 
 /**
  * Orchestration:
- * Understand (AI+rules) → Clarify if needed → Stitch market → Rank → Personalized reply
+ * Understand → if chat/profile/meta, reply conversationally
+ * else Clarify → Stitch market → Rank → Personalized reply
  */
 export async function runAssistantTurn(input: {
   message: string;
@@ -48,14 +49,40 @@ export async function runAssistantTurn(input: {
     profile,
   });
   const brief = understood.brief;
+  const kind = understood.conversationKind;
+  const profileConf = profile.knowledgeConfidence;
+
+  // —— Smart chat path: never force a trip funnel ——
+  if (kind !== "travel_plan") {
+    const fallback = buildChatFallback(kind, input.message, profile);
+    const reply = await craftAssistantReply({
+      stage: "chat",
+      conversationKind: kind,
+      userMessage: input.message,
+      brief,
+      profile,
+      fallback,
+    });
+    return {
+      reply,
+      brief,
+      shortlist: [],
+      stage: "chat",
+      conversationKind: kind,
+      profileConfidence: profileConf,
+      usedAi: understood.usedAi || isAiEnabled(),
+      longTermPreferenceHints: null,
+    };
+  }
 
   const missing: string[] = [];
   if (!brief.destination && !brief.preferences?.vibe) missing.push("destination");
   if (!brief.durationDays) missing.push("duration");
   if (!brief.budgetMax && !brief.budgetMin) missing.push("budget");
-  brief.missingInformation = [...new Set([...(brief.missingInformation || []), ...missing])];
+  brief.missingInformation = [
+    ...new Set([...(brief.missingInformation || []), ...missing]),
+  ];
 
-  // Recompute missing after profile soft-fill from AI layer
   const stillMissing = [...brief.missingInformation];
   if (brief.destination || brief.preferences?.vibe) {
     const i = stillMissing.indexOf("destination");
@@ -71,7 +98,6 @@ export async function runAssistantTurn(input: {
   }
   brief.missingInformation = stillMissing;
 
-  const profileConf = profile.knowledgeConfidence;
   const needClarify =
     brief.confidence < 0.55 ||
     stillMissing.includes("destination") ||
@@ -81,6 +107,8 @@ export async function runAssistantTurn(input: {
     const fallback = buildClarifyReply(brief, profile, stillMissing);
     const reply = await craftAssistantReply({
       stage: "clarify",
+      conversationKind: "travel_plan",
+      userMessage: input.message,
       brief,
       profile,
       missing: stillMissing,
@@ -91,6 +119,7 @@ export async function runAssistantTurn(input: {
       brief,
       shortlist: [],
       stage: "clarify",
+      conversationKind: "travel_plan",
       profileConfidence: profileConf,
       usedAi: understood.usedAi || isAiEnabled(),
       longTermPreferenceHints: understood.longTermPreferenceHints,
@@ -107,6 +136,8 @@ export async function runAssistantTurn(input: {
         : "Where in India, roughly how many days, and what’s the budget?";
     const reply = await craftAssistantReply({
       stage: "empty",
+      conversationKind: "travel_plan",
+      userMessage: input.message,
       brief,
       profile,
       fallback,
@@ -116,6 +147,7 @@ export async function runAssistantTurn(input: {
       brief,
       shortlist: [],
       stage: "empty",
+      conversationKind: "travel_plan",
       profileConfidence: profileConf,
       usedAi: understood.usedAi || isAiEnabled(),
       longTermPreferenceHints: understood.longTermPreferenceHints,
@@ -126,6 +158,8 @@ export async function runAssistantTurn(input: {
   const fallback = buildShortlistReply(brief, profile, shortlist, options.length);
   const reply = await craftAssistantReply({
     stage: "shortlist",
+    conversationKind: "travel_plan",
+    userMessage: input.message,
     brief,
     profile,
     shortlist,
@@ -138,10 +172,52 @@ export async function runAssistantTurn(input: {
     brief: { ...brief, confidence: Math.max(brief.confidence, 0.7) },
     shortlist,
     stage: "shortlist",
+    conversationKind: "travel_plan",
     profileConfidence: profileConf,
     usedAi: understood.usedAi || isAiEnabled(),
     longTermPreferenceHints: understood.longTermPreferenceHints,
   };
+}
+
+function buildChatFallback(
+  kind: "chat" | "profile" | "meta",
+  message: string,
+  profile: CustomerProfileView,
+): string {
+  const name = profile.displayName?.trim();
+  const lower = message.toLowerCase();
+
+  if (kind === "profile" || /name|naam|who am i|know me|remember/.test(lower)) {
+    if (name) {
+      const bits: string[] = [`You’re **${name}** on TripSaathi.`];
+      if (profile.partyType) bits.push(`Usually ${profile.partyType} trips.`);
+      if (profile.homeLocation) bits.push(`Home base: ${profile.homeLocation}.`);
+      if (profile.preferredDestinations?.length) {
+        bits.push(
+          `On your radar: ${profile.preferredDestinations.slice(0, 3).join(", ")}.`,
+        );
+      }
+      bits.push("Whenever you’re ready to plan, just throw me a destination.");
+      return bits.join(" ");
+    }
+    return "I don’t have a name saved for you yet — update it in Preferences, or just tell me what to call you.";
+  }
+
+  if (kind === "meta") {
+    return "I’m TripSaathi — your personal travel companion for India. I search live listings from major platforms and shortlist what fits you. Chat normally anytime; when you want a trip, share destination, days, and budget.";
+  }
+
+  // General chat
+  if (/thank|shukriya|thanks/.test(lower)) {
+    return "Anytime. I’m here when you want to plan — or just chat.";
+  }
+  if (/hi|hello|hey|namaste|good (morning|afternoon|evening)/.test(lower)) {
+    return name
+      ? `Hey ${name.split(" ")[0]} — good to see you. What’s on your mind?`
+      : "Hey — good to see you. What’s on your mind?";
+  }
+
+  return "Got it. I’m happy to chat — and when you want trip ideas, just say where you’re thinking of going.";
 }
 
 function buildClarifyReply(
