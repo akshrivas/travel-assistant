@@ -27,4 +27,7 @@ Understand customer → Understand trip → Stitch existing market → Personali
 
 **Onboarding:** locked as of V1 (basics + travel defaults + prefs/language/mood path).  
 
+**Current slice (hotels-only):**  
+Chat → destination lock → trip brief → **3 hotel quotations** from live market → enquire/listing. Flights deferred.
+
 Any change = new version (V1.1+), not silent drift.

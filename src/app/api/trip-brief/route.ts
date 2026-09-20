@@ -104,7 +104,7 @@ export async function POST(req: Request) {
         data: {
           conversationId,
           role: "user",
-          content: `Trip brief: ${form.destination}, ${form.durationDays} days, ${form.partyType} ×${form.travellers}, ~₹${form.budgetMax}${form.needFlights ? `, flights from ${form.originCity || "?"}` : ""}`,
+          content: `Trip brief: ${form.destination}, ${form.durationDays} days, ${form.partyType} ×${form.travellers}, ~₹${form.budgetMax} · hotels only`,
         },
       }),
     );

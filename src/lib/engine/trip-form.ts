@@ -11,9 +11,10 @@ export type TripFormValues = {
   budgetMin?: number;
   travelStyle: "relaxed" | "balanced" | "adventure" | "luxury";
   avoidPacked?: boolean;
+  /** Flights deferred — V1 hotels-only quotations */
   needFlights?: boolean;
   originCity?: string;
-  departDate?: string; // YYYY-MM-DD
+  departDate?: string;
   returnDate?: string;
   notes?: string;
 };
@@ -56,15 +57,6 @@ export function softFillFromProfile(
   if (!next.travelStyle && typeof profile.preferences?.pace === "string") {
     next.travelStyle = String(profile.preferences.pace);
   }
-  if (
-    !next.temporary?.originCity &&
-    profile.homeLocation
-  ) {
-    next.temporary = {
-      ...(next.temporary || {}),
-      originCity: profile.homeLocation,
-    };
-  }
   return next;
 }
 
@@ -106,10 +98,8 @@ export function formToBrief(
       ...(prior?.temporary || {}),
       budgetMin,
       budgetMax,
-      needFlights: Boolean(form.needFlights),
-      originCity: form.originCity || undefined,
-      departDate: form.departDate || undefined,
-      returnDate: form.returnDate || undefined,
+      // Hotels-only V1 — flights deferred
+      needFlights: false,
     },
     confidence: 0.85,
     missingInformation: [],
@@ -150,11 +140,10 @@ export function defaultFormValues(
     avoidPacked: Boolean(
       brief.constraints?.avoidPacked || profile.avoidances?.packedItinerary,
     ),
-    needFlights: Boolean(brief.temporary?.needFlights ?? true),
-    originCity:
-      String(brief.temporary?.originCity || profile.homeLocation || ""),
-    departDate: String(brief.temporary?.departDate || ""),
-    returnDate: String(brief.temporary?.returnDate || ""),
+    needFlights: false,
+    originCity: "",
+    departDate: "",
+    returnDate: "",
     notes: "",
   };
 }

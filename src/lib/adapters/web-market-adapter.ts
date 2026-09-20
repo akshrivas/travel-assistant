@@ -42,16 +42,12 @@ export const webMarketAdapter: SourceAdapter = {
     const prefs = brief.preferences || {};
     const avoidPacked = Boolean(brief.constraints?.avoidPacked);
 
-    const needFlights = Boolean(brief.temporary?.needFlights);
-    const originCity = brief.temporary?.originCity
-      ? String(brief.temporary.originCity)
-      : "";
     const travellers = brief.travellers || undefined;
 
     const budgetLine =
       budgetMax != null
-        ? `total stay budget around INR ${budgetMin ?? Math.round(budgetMax * 0.7)}–${budgetMax}`
-        : "mid-range budget";
+        ? `total hotel stay budget around INR ${budgetMin ?? Math.round(budgetMax * 0.7)}–${budgetMax} for the whole stay`
+        : "mid-range hotel budget";
 
     const vibeBits = [
       style ? `pace: ${style}` : null,
@@ -60,16 +56,15 @@ export const webMarketAdapter: SourceAdapter = {
       avoidPacked ? "prefer quieter / less packed stays" : null,
       prefs.nature ? "nature-forward" : null,
       typeof prefs.vibe === "string" ? `vibe: ${prefs.vibe}` : null,
-      needFlights && originCity
-        ? `also note typical flight options from ${originCity} to ${dest} if found on major OTAs`
-        : null,
+      typeof prefs.notes === "string" ? `notes: ${prefs.notes}` : null,
+      typeof prefs.hotel === "string" ? `hotel style: ${prefs.hotel}` : null,
       brief.datesText ? `timing: ${brief.datesText}` : null,
     ]
       .filter(Boolean)
       .join("; ");
 
-    const query = `You are a travel market researcher for India stays.
-Search the live web for currently listed hotel / resort / holiday stay options in ${dest}, India.
+    const query = `You are a travel market researcher for India HOTELS / resorts only (no flights, no packages unless hotel-led).
+Search the live web for currently listed hotel / resort stay options in ${dest}, India that a traveller could enquire about.
 
 Trip brief:
 - ~${nights} nights (${days} days)
@@ -78,17 +73,18 @@ Trip brief:
 ${vibeBits ? `- Preferences: ${vibeBits}` : ""}
 
 Priority rules (strict):
-1. Prefer top market platforms: ${TRUSTED_PLATFORMS.join(", ")}. Diversify across platforms when possible — do not return everything from one OTA.
-2. Prefer properties with the strongest guest ratings AND enough reviews (favor 100+ reviews when available).
-3. Prefer well-known / highly booked properties over obscure listings.
-4. Diversify: mix 1 premium-fit, 1 strong value, 1 distinctive/relaxed option when possible.
-5. Do NOT invent properties, prices, ratings, or URLs. Only use what search finds.
-6. url MUST be a property-specific listing page (hotel detail), never a city/category search results page.
-7. If a field is unknown, omit it rather than guessing wildly.
+1. Hotels and resorts ONLY — do not return flights, buses, or pure tour packages without a named stay.
+2. Prefer top market platforms: ${TRUSTED_PLATFORMS.join(", ")}. Diversify across platforms when possible — do not return everything from one OTA.
+3. Prefer properties with the strongest guest ratings AND enough reviews (favor 100+ reviews when available).
+4. Prefer well-known / highly booked properties over obscure listings.
+5. Diversify: mix 1 premium-fit, 1 strong value, 1 distinctive/relaxed option when possible.
+6. Do NOT invent properties, prices, ratings, or URLs. Only use what search finds.
+7. url MUST be a property-specific hotel listing page, never a city/category search results page.
+8. If a field is unknown, omit it rather than guessing wildly.
 
 Return ONLY valid JSON (no markdown):
-{"options":[{"externalId":"slug","name":"property name","location":"area, city","nights":${nights},"price_inr":number,"rating":number,"review_count":number,"url":"https://...","provider":"Booking.com|MakeMyTrip|Agoda|Hotels.com|Goibibo|Tripadvisor|Official|Other","inclusions":["..."],"cancellation":"...","tags":["relaxed","family","value"],"why":"one line why this is a strong market pick"}]}
-Aim for 5 options. Prices should be approximate INR totals for the stay when possible.`;
+{"options":[{"externalId":"slug","name":"property name","location":"area, city","nights":${nights},"price_inr":number,"rating":number,"review_count":number,"url":"https://...","provider":"Booking.com|MakeMyTrip|Agoda|Hotels.com|Goibibo|Tripadvisor|Official|Other","inclusions":["..."],"cancellation":"...","tags":["relaxed","family","value"],"why":"one line why this is a strong hotel pick"}]}
+Aim for 5 hotel options. Prices = approximate INR totals for the hotel stay (not flights).`;
 
     try {
       const response = await openai.responses.create({

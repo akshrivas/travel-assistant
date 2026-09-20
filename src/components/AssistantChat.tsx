@@ -96,7 +96,7 @@ function buildWelcome(input: {
         : "I already know a bit about how you like to travel.";
       return {
         greeting: greet,
-        body: `${known} Tell me the next India trip — I’ll search live listings and shortlist the strongest fits.`,
+        body: `${known} Tell me the next India trip — I’ll search live hotel listings and bring back 3 strong quotations.`,
       };
     }
     const known = bits.length
@@ -104,19 +104,19 @@ function buildWelcome(input: {
       : "Thoda pehle se jaanta hoon aapki travel vibe.";
     return {
       greeting: greet,
-      body: `${known} Agla India trip batao — live listings search karke best fits shortlist karunga.`,
+      body: `${known} Agla India trip batao — live market se 3 best hotel quotations laata hoon.`,
     };
   }
 
   if (lang === "en") {
     return {
       greeting: greet,
-      body: "Where in India are you headed, roughly how many days, and what’s the budget? I’ll search live market listings and bring back the best-reviewed options.",
+      body: "Where in India are you headed, roughly how many days, and what’s the budget? I’ll search live hotel listings and return 3 best quotations.",
     };
   }
   return {
     greeting: greet,
-    body: "India mein kahan jaana hai, roughly kitne din, aur budget? Live market se best-reviewed options nikaal ke laata hoon.",
+    body: "India mein kahan jaana hai, roughly kitne din, aur budget? Live market se 3 best hotel quotations nikaal ke laata hoon.",
   };
 }
 
@@ -497,7 +497,7 @@ export function AssistantChat({
       {
         id: `u-form-${Date.now()}`,
         role: "user",
-        content: `Trip brief locked: ${values.destination}, ${values.durationDays} days, ${values.partyType} ×${values.travellers}, ~₹${values.budgetMax.toLocaleString("en-IN")}${values.needFlights ? `, flights from ${values.originCity}` : ""}`,
+        content: `Trip brief locked: ${values.destination}, ${values.durationDays} days, ${values.partyType} ×${values.travellers}, ~₹${values.budgetMax.toLocaleString("en-IN")} · hotels only`,
       },
       {
         id: `a-${Date.now()}`,

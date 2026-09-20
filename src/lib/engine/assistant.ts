@@ -223,8 +223,8 @@ export async function runAssistantTurn(input: {
     const dest = brief.destination || String(brief.preferences?.vibe || "your trip");
     const reply =
       profile.preferredLanguage === "en"
-        ? `**${dest}** locked. Fill the quick brief below (dates, who’s going, budget, vibe, flights) — then I’ll search the live market.`
-        : `**${dest}** lock. Neeche short form bhar do (kab/din, kaun, budget, vibe, flights) — phir live market se shortlist laata hoon.`;
+        ? `**${dest}** locked. Fill the quick brief below (dates, who’s going, budget, vibe) — then I’ll pull **3 hotel quotations** from the live market.`
+        : `**${dest}** lock. Neeche short form bhar do (kab/din, kaun, budget, vibe) — phir live market se **3 hotel quotations** laata hoon.`;
     return {
       reply,
       brief: {
@@ -515,10 +515,10 @@ function buildShortlistReply(
       : "";
 
   return [
-    `Compared ${totalFound} live listings and shortlisted ${shortlist.length} strong picks ${who}${budgetNote}:`,
+    `Market se ${totalFound} hotel listings dekhi — yeh **${shortlist.length} best hotel quotations** ${who}${budgetNote}:`,
     "",
     ...lines,
     "",
-    "Prices/availability can change — confirm on the source link. Which one should I enquire about?",
+    "Prices/availability change ho sakti hai — listing pe confirm karo. Kaunsi pe enquire?",
   ].join("\n");
 }

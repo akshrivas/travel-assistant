@@ -65,18 +65,11 @@ export function TripBriefForm({
       setError(hinglish ? "Budget band chahiye" : "Budget required");
       return;
     }
-    if (values.needFlights && !values.originCity?.trim()) {
-      setError(
-        hinglish
-          ? "Flight ke liye city of origin batao"
-          : "Origin city needed for flights",
-      );
-      return;
-    }
     startTransition(async () => {
       try {
         await onSubmit({
           ...values,
+          needFlights: false,
           budgetMin: Math.round(values.budgetMax * 0.75),
         });
       } catch {
@@ -92,12 +85,12 @@ export function TripBriefForm({
     >
       <div>
         <p className="font-[family-name:var(--font-display)] text-lg text-[var(--ink)]">
-          {values.destination || "Trip"} — quick brief
+          {values.destination || "Trip"} — hotel brief
         </p>
         <p className="text-xs text-[var(--muted)]">
           {hinglish
-            ? "Destination lock. Baaki form se — phir existing market se shortlist."
-            : "Destination locked. Rest via form — then shortlist from the live market."}
+            ? "Destination lock. Form bharo — phir market se 3 best hotel quotations."
+            : "Destination locked. Fill this — then 3 best hotel quotations from the live market."}
         </p>
       </div>
 
@@ -199,50 +192,6 @@ export function TripBriefForm({
         </label>
       </div>
 
-      <div className="border-t border-[var(--line)] pt-3">
-        <label className="flex items-center gap-2 text-sm text-[var(--ink)]">
-          <input
-            type="checkbox"
-            checked={Boolean(values.needFlights)}
-            onChange={(e) => set("needFlights", e.target.checked)}
-          />
-          {hinglish ? "Flights bhi chahiye" : "Need flights too"}
-        </label>
-        {values.needFlights ? (
-          <div className="mt-2 space-y-2">
-            <label className={label}>
-              {hinglish ? "Udan kahan se (city)" : "Flying from (city)"}
-              <input
-                className={field}
-                value={values.originCity || ""}
-                onChange={(e) => set("originCity", e.target.value)}
-                placeholder="e.g. Delhi"
-              />
-            </label>
-            <div className="grid grid-cols-2 gap-2">
-              <label className={label}>
-                Depart
-                <input
-                  type="date"
-                  className={field}
-                  value={values.departDate || ""}
-                  onChange={(e) => set("departDate", e.target.value)}
-                />
-              </label>
-              <label className={label}>
-                Return
-                <input
-                  type="date"
-                  className={field}
-                  value={values.returnDate || ""}
-                  onChange={(e) => set("returnDate", e.target.value)}
-                />
-              </label>
-            </div>
-          </div>
-        ) : null}
-      </div>
-
       <label className={label}>
         {hinglish ? "Kuch aur? (optional)" : "Anything else? (optional)"}
         <input
@@ -250,7 +199,9 @@ export function TripBriefForm({
           value={values.notes || ""}
           onChange={(e) => set("notes", e.target.value)}
           placeholder={
-            hinglish ? "e.g. beach near, kids pool…" : "e.g. near beach, kids pool…"
+            hinglish
+              ? "e.g. kids pool, quiet area…"
+              : "e.g. near beach, kids pool…"
           }
         />
       </label>
@@ -264,11 +215,11 @@ export function TripBriefForm({
       >
         {pending
           ? hinglish
-            ? "Market search ho rahi…"
-            : "Searching market…"
+            ? "Hotels search ho rahi…"
+            : "Searching hotels…"
           : hinglish
-            ? "Shortlist laao"
-            : "Get shortlist"}
+            ? "3 hotel quotes laao"
+            : "Get 3 hotel quotes"}
       </button>
     </form>
   );
