@@ -143,6 +143,22 @@ function lastTopicHint(messages: ChatMessage[]): string | null {
   return t.length > 72 ? `${t.slice(0, 70)}…` : t;
 }
 
+function relativeWhen(ts: number, lang: string | null | undefined): string {
+  const mins = Math.max(0, Math.round((Date.now() - ts) / 60000));
+  if (lang === "en") {
+    if (mins < 1) return "Just now";
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.round(mins / 60);
+    if (hrs < 48) return `${hrs}h ago`;
+    return `${Math.round(hrs / 24)}d ago`;
+  }
+  if (mins < 1) return "Abhi abhi";
+  if (mins < 60) return `${mins} min pehle`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 48) return `${hrs}h pehle`;
+  return `${Math.round(hrs / 24)} din pehle`;
+}
+
 function renderContent(text: string) {
   return text.split("\n").map((line, i) => {
     const html = line.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
@@ -226,6 +242,15 @@ export function AssistantChat({
   );
 
   const [ready, setReady] = useState(false);
+  const [gate, setGate] = useState<"open" | "choose">("open");
+  const [savedPreview, setSavedPreview] = useState<{
+    topic: string;
+    updatedAt: number;
+    messages: ChatMessage[];
+    conversationId?: string;
+    travelRequestId?: string;
+    priorBrief: Record<string, unknown> | null;
+  } | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [conversationId, setConversationId] = useState<string | undefined>();
@@ -243,44 +268,90 @@ export function AssistantChat({
   const inputRef = useRef<HTMLInputElement>(null);
   const emailKey = userEmail.toLowerCase().trim();
 
-  // Restore conversation from device memory (survives refresh / PWA reopen)
+  function applyWelcome() {
+    setMessages([
+      {
+        id: "welcome",
+        role: "assistant",
+        content: `${welcome.greeting}\n\n${welcome.body}`,
+      },
+    ]);
+    setStarted(false);
+    setConversationId(undefined);
+    setTravelRequestId(undefined);
+    setPriorBrief(null);
+    setEnquireMsg(null);
+    setTripFormOpen(false);
+    setFormBrief(null);
+  }
+
+  function restoreSaved(saved: NonNullable<typeof savedPreview>) {
+    setMessages(saved.messages);
+    setConversationId(saved.conversationId);
+    setTravelRequestId(saved.travelRequestId);
+    setPriorBrief(saved.priorBrief);
+    setStarted(true);
+    const last = saved.messages[saved.messages.length - 1];
+    if (last?.stage === "trip_form" && (last.brief || saved.priorBrief)) {
+      setFormBrief((last.brief || saved.priorBrief) as TravelEnquiryBrief);
+      setTripFormOpen(true);
+    } else {
+      setTripFormOpen(false);
+      setFormBrief(null);
+    }
+  }
+
+  // On load: if a prior chat exists, ask Continue vs New (don't auto-jump in)
   useEffect(() => {
     const mem = readChatMemory(emailKey || undefined);
-    if (mem?.messages?.length) {
-      setMessages(mem.messages);
-      setConversationId(mem.conversationId);
-      setTravelRequestId(mem.travelRequestId);
-      setPriorBrief(mem.priorBrief ?? null);
-      const hasRealChat = mem.messages.some(
-        (m) => m.role === "user" || (m.role === "assistant" && m.id !== "welcome"),
-      );
-      setStarted(hasRealChat);
-      const last = mem.messages[mem.messages.length - 1] as ChatMessage | undefined;
-      if (
-        last?.stage === "trip_form" &&
-        (last.brief || mem.priorBrief)
-      ) {
-        setFormBrief(
-          (last.brief || mem.priorBrief) as TravelEnquiryBrief,
-        );
-        setTripFormOpen(true);
-      }
+    const hasRealChat = Boolean(
+      mem?.messages?.some(
+        (m) =>
+          m.role === "user" || (m.role === "assistant" && m.id !== "welcome"),
+      ),
+    );
+
+    if (mem && hasRealChat) {
+      const topic =
+        lastTopicHint(mem.messages as ChatMessage[]) ||
+        (preferredLanguage === "en" ? "Previous trip chat" : "Pichhli trip chat");
+      setSavedPreview({
+        topic,
+        updatedAt: mem.updatedAt,
+        messages: mem.messages as ChatMessage[],
+        conversationId: mem.conversationId,
+        travelRequestId: mem.travelRequestId,
+        priorBrief: mem.priorBrief ?? null,
+      });
+      applyWelcome();
+      setGate("choose");
     } else {
-      setMessages([
-        {
-          id: "welcome",
-          role: "assistant",
-          content: `${welcome.greeting}\n\n${welcome.body}`,
-        },
-      ]);
-      setStarted(false);
+      applyWelcome();
+      setGate("open");
+      setSavedPreview(null);
     }
     setReady(true);
-  }, [emailKey, welcome.greeting, welcome.body]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- welcome strings change with profile; re-run on email
+  }, [emailKey]);
 
-  // Persist thread whenever it changes
+  function continueSaved() {
+    if (!savedPreview) return;
+    restoreSaved(savedPreview);
+    setGate("open");
+    setSavedPreview(null);
+  }
+
+  function startFresh() {
+    clearChatMemory();
+    setSavedPreview(null);
+    applyWelcome();
+    setGate("open");
+  }
+
+  // Persist thread whenever it changes (only after user opens a chat)
   useEffect(() => {
-    if (!ready || !emailKey || !messages.length) return;
+    if (!ready || gate !== "open" || !emailKey || !messages.length) return;
+    if (!started) return;
     writeChatMemory({
       email: emailKey,
       conversationId,
@@ -291,17 +362,19 @@ export function AssistantChat({
     });
   }, [
     ready,
+    gate,
     emailKey,
     conversationId,
     travelRequestId,
     priorBrief,
     messages,
+    started,
   ]);
 
   useEffect(() => {
-    if (!ready) return;
+    if (!ready || gate !== "open") return;
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, pending, ready]);
+  }, [messages, pending, ready, gate]);
 
   useEffect(() => {
     fetch("/api/ai/status")
@@ -310,12 +383,11 @@ export function AssistantChat({
       .catch(() => setAiOn(false));
   }, []);
 
-  const showHero = ready && !started && messages.length <= 1;
   const topic = lastTopicHint(messages);
 
   function send(text: string) {
     const trimmed = text.trim();
-    if (!trimmed || pending || !ready) return;
+    if (!trimmed || pending || !ready || gate !== "open") return;
 
     setStarted(true);
     const userMsg: ChatMessage = {
@@ -458,31 +530,24 @@ export function AssistantChat({
     }
   }
 
-  function startFresh() {
-    clearChatMemory();
-    setConversationId(undefined);
-    setTravelRequestId(undefined);
-    setPriorBrief(null);
-    setEnquireMsg(null);
-    setTripFormOpen(false);
-    setFormBrief(null);
-    setStarted(false);
-    setMessages([
-      {
-        id: "welcome",
-        role: "assistant",
-        content: `${welcome.greeting}\n\n${welcome.body}`,
-      },
-    ]);
-  }
-
   if (!ready) {
     return (
       <div className="flex min-h-[100dvh] items-center justify-center text-sm text-[var(--muted)]">
-        Picking up where we left off…
+        Loading…
       </div>
     );
   }
+
+  const showGate = gate === "choose" && savedPreview;
+  const showHero = ready && gate === "open" && !started && messages.length <= 1;
+  const showComposer = gate === "open";
+  const lang = preferredLanguage || "hinglish";
+  const continueLabel =
+    lang === "en" ? "Continue previous chat" : "Purani chat continue";
+  const newChatLabel = lang === "en" ? "Start new chat" : "Nayi chat shuru";
+  const whenLabel = savedPreview
+    ? relativeWhen(savedPreview.updatedAt, lang)
+    : "";
 
   return (
     <div className="relative flex min-h-[100dvh] flex-col overflow-hidden">
@@ -504,13 +569,17 @@ export function AssistantChat({
               {APP_NAME}
             </p>
             <p className="mt-1 truncate text-xs text-[var(--muted)] sm:text-sm">
-              {started && topic
-                ? `Continuing · ${topic}`
-                : `Live market · India${aiOn ? " · AI on" : aiOn === false ? " · AI off" : ""}`}
+              {gate === "choose"
+                ? lang === "en"
+                  ? "Pick up or start fresh"
+                  : "Continue ya nayi shuru"
+                : started && topic
+                  ? `Continuing · ${topic}`
+                  : `Live market · India${aiOn ? " · AI on" : aiOn === false ? " · AI off" : ""}`}
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-3">
-            {started ? (
+            {started && gate === "open" ? (
               <button
                 type="button"
                 className="text-xs text-[var(--muted)] underline-offset-2 hover:text-[var(--ink)] hover:underline"
@@ -542,7 +611,51 @@ export function AssistantChat({
       </header>
 
       <main className="relative z-10 mx-auto flex w-full max-w-3xl flex-1 flex-col px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-5">
-        {showHero ? (
+        {showGate ? (
+          <section className="flex flex-1 flex-col items-center justify-center pb-10 text-center">
+            <p className="ts-rise text-xs uppercase tracking-[0.18em] text-[var(--accent)]">
+              {timeGreeting()}
+            </p>
+            <h1 className="ts-rise-delay-1 mt-3 font-[family-name:var(--font-display)] text-[2.5rem] leading-[1.05] tracking-tight text-[var(--ink)] sm:text-5xl">
+              {APP_NAME}
+            </h1>
+            <p className="ts-rise-delay-2 mt-4 max-w-sm text-[1.05rem] leading-relaxed text-[var(--muted)]">
+              {lang === "en"
+                ? "You have a chat on this device. Continue it, or start clean."
+                : "Is device pe ek chat padi hai. Continue karo, ya clean start."}
+            </p>
+
+            <div className="ts-rise-delay-3 mt-10 flex w-full max-w-sm flex-col gap-3">
+              <button
+                type="button"
+                onClick={continueSaved}
+                className="border border-[var(--accent)] bg-[var(--accent)] px-5 py-4 text-left text-[var(--sand)] transition duration-300 hover:-translate-y-0.5"
+              >
+                <p className="font-[family-name:var(--font-display)] text-xl leading-tight">
+                  {continueLabel}
+                </p>
+                <p className="mt-1 truncate text-sm text-[var(--sand)]/80">
+                  {savedPreview.topic}
+                </p>
+                <p className="mt-0.5 text-xs text-[var(--sand)]/60">{whenLabel}</p>
+              </button>
+              <button
+                type="button"
+                onClick={startFresh}
+                className="border border-[var(--line)] bg-[var(--surface)]/85 px-5 py-4 text-left transition duration-300 hover:-translate-y-0.5 hover:border-[var(--accent)]"
+              >
+                <p className="font-[family-name:var(--font-display)] text-xl leading-tight text-[var(--ink)]">
+                  {newChatLabel}
+                </p>
+                <p className="mt-1 text-sm text-[var(--muted)]">
+                  {lang === "en"
+                    ? "Fresh thread · same preferences"
+                    : "Naya thread · preferences same"}
+                </p>
+              </button>
+            </div>
+          </section>
+        ) : showHero ? (
           <section className="flex flex-1 flex-col justify-center pb-6">
             <p className="ts-rise text-xs uppercase tracking-[0.18em] text-[var(--accent)]">
               {timeGreeting()}
@@ -682,6 +795,7 @@ export function AssistantChat({
           </div>
         )}
 
+        {showComposer ? (
         <form
           className="ts-composer mt-auto flex gap-2 border border-[var(--line)] bg-[var(--surface)]/90 px-3 py-2 backdrop-blur-md transition"
           onSubmit={(e) => {
@@ -710,6 +824,7 @@ export function AssistantChat({
             {pending ? "…" : "Send"}
           </button>
         </form>
+        ) : null}
       </main>
     </div>
   );
