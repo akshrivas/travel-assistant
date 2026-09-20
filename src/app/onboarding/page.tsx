@@ -1,14 +1,16 @@
 import { redirect } from "next/navigation";
-import { getSessionUserId } from "@/lib/auth/session";
-import { prisma } from "@/lib/db";
+import { getSession } from "@/lib/auth/session";
+import { requireUser } from "@/lib/auth/require-user";
 import { OnboardingWizard } from "@/components/OnboardingWizard";
 
 export default async function OnboardingPage() {
-  const userId = await getSessionUserId();
-  if (!userId) redirect("/login");
+  const session = await getSession();
+  if (!session?.email) redirect("/login");
 
-  const profile = await prisma.profile.findUnique({ where: { userId } });
-  if (profile?.onboardingComplete) redirect("/");
+  const user = await requireUser();
+  if (user?.profile?.onboardingComplete || session.onboardingComplete) {
+    redirect("/");
+  }
 
   return <OnboardingWizard />;
 }

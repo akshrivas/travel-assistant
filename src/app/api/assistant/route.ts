@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { prisma } from "@/lib/db";
-import { getSessionUserId } from "@/lib/auth/session";
+import { requireUser } from "@/lib/auth/require-user";
 import { toProfileView } from "@/lib/profile";
 import { runAssistantTurn } from "@/lib/engine/assistant";
+import { prisma } from "@/lib/db";
 import type { TravelEnquiryBrief } from "@/lib/types/travel";
 
 const bodySchema = z.object({
@@ -51,8 +51,8 @@ function briefFromRequest(priorReq: {
 
 export async function POST(req: Request) {
   try {
-    const userId = await getSessionUserId();
-    if (!userId) {
+    const user = await requireUser();
+    if (!user?.profile) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -63,14 +63,6 @@ export async function POST(req: Request) {
         { error: "Invalid body", details: parsed.error.flatten() },
         { status: 400 },
       );
-    }
-
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      include: { profile: true },
-    });
-    if (!user?.profile) {
-      return NextResponse.json({ error: "Profile required" }, { status: 400 });
     }
 
     const profile = toProfileView(user.profile);

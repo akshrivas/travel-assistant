@@ -47,24 +47,55 @@ export function OnboardingWizard() {
     );
   }
 
-  function save(payload: Record<string, unknown>, next?: Step | "done") {
+  function buildPayload(complete: boolean) {
+    const destList = destinations
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const max = budgetMax ? parseInt(budgetMax, 10) * 1000 : null;
+    const preferences: Record<string, unknown> = {};
+    if (pace) preferences.pace = pace;
+    if (interests.length) preferences.interests = interests;
+    const avoidances: Record<string, unknown> = {};
+    if (avoidPacked) avoidances.packedItinerary = true;
+
+    return {
+      displayName: displayName.trim() || undefined,
+      homeLocation: homeLocation.trim() || undefined,
+      preferredLanguage,
+      partyType,
+      typicalDuration: typicalDuration ? parseInt(typicalDuration, 10) : null,
+      budgetMin: max ? Math.round(max * 0.7) : null,
+      budgetMax: max,
+      preferredDestinations: destList,
+      preferences,
+      avoidances,
+      complete,
+    };
+  }
+
+  function save(complete: boolean, next?: Step | "done") {
     setError(null);
     startTransition(async () => {
-      const res = await fetch("/api/onboarding", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.error || "Could not save");
-        return;
-      }
-      if (next === "done") {
-        router.push("/");
-        router.refresh();
-      } else if (next) {
-        setStep(next);
+      try {
+        const res = await fetch("/api/onboarding", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(buildPayload(complete)),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          setError(data.error || "Could not save");
+          return;
+        }
+        if (next === "done") {
+          router.push("/");
+          router.refresh();
+        } else if (next) {
+          setStep(next);
+        }
+      } catch {
+        setError("Network error — please try again");
       }
     });
   }
@@ -75,14 +106,8 @@ export function OnboardingWizard() {
       setError("What should we call you?");
       return;
     }
-    save(
-      {
-        displayName: displayName.trim(),
-        homeLocation: homeLocation.trim() || undefined,
-        preferredLanguage,
-      },
-      2,
-    );
+    // Persist full snapshot each step (serverless-safe)
+    save(false, 2);
   }
 
   function submitStep2(skip: boolean) {
@@ -90,34 +115,14 @@ export function OnboardingWizard() {
       setStep(3);
       return;
     }
-    const destList = destinations
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
-    const max = budgetMax ? parseInt(budgetMax, 10) * 1000 : null;
-    save(
-      {
-        partyType,
-        typicalDuration: typicalDuration ? parseInt(typicalDuration, 10) : null,
-        budgetMin: max ? Math.round(max * 0.7) : null,
-        budgetMax: max,
-        preferredDestinations: destList,
-      },
-      3,
-    );
+    save(false, 3);
   }
 
   function submitStep3(skip: boolean) {
+    save(true, "done");
     if (skip) {
-      save({ complete: true }, "done");
-      return;
+      // still marks complete with whatever we have
     }
-    const preferences: Record<string, unknown> = {};
-    if (pace) preferences.pace = pace;
-    if (interests.length) preferences.interests = interests;
-    const avoidances: Record<string, unknown> = {};
-    if (avoidPacked) avoidances.packedItinerary = true;
-    save({ preferences, avoidances, complete: true }, "done");
   }
 
   return (
@@ -171,7 +176,7 @@ export function OnboardingWizard() {
           </label>
           {error && <p className="text-sm text-red-700">{error}</p>}
           <button type="submit" disabled={pending} className={btnClass}>
-            Continue
+            {pending ? "Saving…" : "Continue"}
           </button>
         </form>
       )}
@@ -231,7 +236,7 @@ export function OnboardingWizard() {
               onClick={() => submitStep2(false)}
               className={`${btnClass} flex-1`}
             >
-              Continue
+              {pending ? "Saving…" : "Continue"}
             </button>
             <button
               type="button"
@@ -287,7 +292,7 @@ export function OnboardingWizard() {
               onClick={() => submitStep3(false)}
               className={`${btnClass} flex-1`}
             >
-              Finish — plan a trip
+              {pending ? "Saving…" : "Finish — plan a trip"}
             </button>
             <button
               type="button"

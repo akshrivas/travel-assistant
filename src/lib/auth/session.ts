@@ -1,25 +1,32 @@
 import { createHmac, timingSafeEqual } from "crypto";
 import { cookies } from "next/headers";
+import type { CustomerProfileView } from "@/lib/types/travel";
 
 const COOKIE = "ta_session";
-const MAX_AGE = 60 * 60 * 24 * 30; // 30 days
+const MAX_AGE = 60 * 60 * 24 * 30;
+
+export type SessionPayload = {
+  userId: string;
+  email: string;
+  onboardingComplete?: boolean;
+  profile?: Partial<CustomerProfileView>;
+  t: number;
+};
 
 function secret() {
   return process.env.SESSION_SECRET || "travel-assistant-dev-secret-change-me";
 }
 
-function sign(userId: string): string {
-  const payload = Buffer.from(JSON.stringify({ userId, t: Date.now() })).toString(
-    "base64url",
-  );
-  const sig = createHmac("sha256", secret()).update(payload).digest("base64url");
-  return `${payload}.${sig}`;
+function sign(payload: SessionPayload): string {
+  const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  const sig = createHmac("sha256", secret()).update(body).digest("base64url");
+  return `${body}.${sig}`;
 }
 
-function verify(token: string): string | null {
-  const [payload, sig] = token.split(".");
-  if (!payload || !sig) return null;
-  const expected = createHmac("sha256", secret()).update(payload).digest("base64url");
+function verify(token: string): SessionPayload | null {
+  const [body, sig] = token.split(".");
+  if (!body || !sig) return null;
+  const expected = createHmac("sha256", secret()).update(body).digest("base64url");
   try {
     const a = Buffer.from(sig);
     const b = Buffer.from(expected);
@@ -28,24 +35,29 @@ function verify(token: string): string | null {
     return null;
   }
   try {
-    const data = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as {
-      userId?: string;
-    };
-    return data.userId ?? null;
+    const data = JSON.parse(
+      Buffer.from(body, "base64url").toString("utf8"),
+    ) as SessionPayload;
+    if (!data.email || !data.userId) return null;
+    return data;
   } catch {
     return null;
   }
 }
 
-export async function setSessionUserId(userId: string) {
+export async function setSession(payload: SessionPayload) {
   const jar = await cookies();
-  jar.set(COOKIE, sign(userId), {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.VERCEL === "1",
-    path: "/",
-    maxAge: MAX_AGE,
-  });
+  jar.set(
+    COOKIE,
+    sign({ ...payload, email: payload.email.toLowerCase(), t: Date.now() }),
+    {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.VERCEL === "1",
+      path: "/",
+      maxAge: MAX_AGE,
+    },
+  );
 }
 
 export async function clearSession() {
@@ -53,9 +65,14 @@ export async function clearSession() {
   jar.delete(COOKIE);
 }
 
-export async function getSessionUserId(): Promise<string | null> {
+export async function getSession(): Promise<SessionPayload | null> {
   const jar = await cookies();
   const token = jar.get(COOKIE)?.value;
   if (!token) return null;
   return verify(token);
+}
+
+export async function getSessionUserId(): Promise<string | null> {
+  const s = await getSession();
+  return s?.userId ?? null;
 }
