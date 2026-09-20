@@ -171,6 +171,12 @@ export function AssistantChat({
             <p className="hidden text-xs text-[var(--muted)] sm:block">
               Hi {userName}
             </p>
+            <a
+              href="/profile"
+              className="text-xs text-[var(--muted)] underline underline-offset-2"
+            >
+              Preferences
+            </a>
             <button
               type="button"
               className="text-xs text-[var(--muted)] underline underline-offset-2"

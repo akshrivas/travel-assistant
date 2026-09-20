@@ -10,6 +10,7 @@ export function middleware(req: NextRequest) {
   const isPublic =
     pathname.startsWith("/login") ||
     pathname.startsWith("/api/auth") ||
+    pathname.startsWith("/api/ai/status") ||
     pathname.startsWith("/_next") ||
     pathname.startsWith("/favicon");
 
@@ -19,11 +20,12 @@ export function middleware(req: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // API (except auth) needs session
+  // API (except auth + ai status) needs session
   if (
     !hasSession &&
     pathname.startsWith("/api/") &&
-    !pathname.startsWith("/api/auth")
+    !pathname.startsWith("/api/auth") &&
+    !pathname.startsWith("/api/ai/status")
   ) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
