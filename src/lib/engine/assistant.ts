@@ -41,12 +41,15 @@ export async function runAssistantTurn(input: {
   message: string;
   priorBrief?: TravelEnquiryBrief | null;
   profile?: CustomerProfileView | null;
+  history?: Array<{ role: "user" | "assistant"; content: string }>;
 }): Promise<AssistantTurnResult> {
   const profile = input.profile ?? emptyProfile();
+  const history = input.history || [];
   const understood = await understandWithAi({
     message: input.message,
     priorBrief: input.priorBrief,
     profile,
+    history,
   });
   const brief = understood.brief;
   const kind = understood.conversationKind;
@@ -54,11 +57,12 @@ export async function runAssistantTurn(input: {
 
   // —— Smart chat path: never force a trip funnel ——
   if (kind !== "travel_plan") {
-    const fallback = buildChatFallback(kind, input.message, profile);
+    const fallback = buildChatFallback(kind, input.message, profile, history);
     const reply = await craftAssistantReply({
       stage: "chat",
       conversationKind: kind,
       userMessage: input.message,
+      history,
       brief,
       profile,
       fallback,
@@ -109,6 +113,7 @@ export async function runAssistantTurn(input: {
       stage: "clarify",
       conversationKind: "travel_plan",
       userMessage: input.message,
+      history,
       brief,
       profile,
       missing: stillMissing,
@@ -138,6 +143,7 @@ export async function runAssistantTurn(input: {
       stage: "empty",
       conversationKind: "travel_plan",
       userMessage: input.message,
+      history,
       brief,
       profile,
       fallback,
@@ -160,6 +166,7 @@ export async function runAssistantTurn(input: {
     stage: "shortlist",
     conversationKind: "travel_plan",
     userMessage: input.message,
+    history,
     brief,
     profile,
     shortlist,
@@ -183,9 +190,13 @@ function buildChatFallback(
   kind: "chat" | "profile" | "meta",
   message: string,
   profile: CustomerProfileView,
+  history: Array<{ role: "user" | "assistant"; content: string }> = [],
 ): string {
   const name = profile.displayName?.trim();
   const lower = message.toLowerCase();
+  const priorUser = [...history]
+    .reverse()
+    .find((h) => h.role === "user")?.content;
 
   if (kind === "profile" || /name|naam|who am i|know me|remember/.test(lower)) {
     if (name) {
@@ -197,6 +208,9 @@ function buildChatFallback(
           `On your radar: ${profile.preferredDestinations.slice(0, 3).join(", ")}.`,
         );
       }
+      if (priorUser && !/name|naam/.test(priorUser.toLowerCase())) {
+        bits.push(`Last you mentioned: “${priorUser.slice(0, 60)}${priorUser.length > 60 ? "…" : ""}”.`);
+      }
       bits.push("Whenever you’re ready to plan, just throw me a destination.");
       return bits.join(" ");
     }
@@ -204,20 +218,26 @@ function buildChatFallback(
   }
 
   if (kind === "meta") {
-    return "I’m TripSaathi — your personal travel companion for India. I search live listings from major platforms and shortlist what fits you. Chat normally anytime; when you want a trip, share destination, days, and budget.";
+    return "I’m TripSaathi — your personal travel companion for India. I remember this chat on your device, search live listings, and shortlist what fits you. Chat anytime; when you want a trip, share destination, days, and budget.";
   }
 
-  // General chat
   if (/thank|shukriya|thanks/.test(lower)) {
-    return "Anytime. I’m here when you want to plan — or just chat.";
+    return "Anytime. I’m right here in this thread whenever you want to continue.";
   }
   if (/hi|hello|hey|namaste|good (morning|afternoon|evening)/.test(lower)) {
+    if (priorUser) {
+      return `Hey${name ? ` ${name.split(" ")[0]}` : ""} — still here. We were on “${priorUser.slice(0, 48)}${priorUser.length > 48 ? "…" : ""}”. Want to pick that up?`;
+    }
     return name
       ? `Hey ${name.split(" ")[0]} — good to see you. What’s on your mind?`
       : "Hey — good to see you. What’s on your mind?";
   }
 
-  return "Got it. I’m happy to chat — and when you want trip ideas, just say where you’re thinking of going.";
+  if (/samundar|sea|beach|ocean/.test(lower)) {
+    return "Got it — you still haven’t seen the sea. When you’re ready, I can shortlist calm coastal stays (Goa, Kerala, Andaman…) around your usual budget.";
+  }
+
+  return "Got it — I’m following this thread. Tell me more, or share a destination whenever you want options.";
 }
 
 function buildClarifyReply(

@@ -3,14 +3,16 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { APP_NAME } from "@/lib/brand";
 import { clearProfileBackup } from "@/lib/auth/client-backup";
+import {
+  clearChatMemory,
+  historyForModel,
+  readChatMemory,
+  writeChatMemory,
+  type StoredChatMessage,
+} from "@/lib/auth/chat-memory";
 import type { RankedOption } from "@/lib/types/travel";
 
-type ChatMessage = {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  shortlist?: RankedOption[];
-};
+type ChatMessage = StoredChatMessage;
 
 type TripSpark = {
   label: string;
@@ -85,6 +87,15 @@ function buildWelcome(input: {
   };
 }
 
+function lastTopicHint(messages: ChatMessage[]): string | null {
+  const recent = [...messages]
+    .reverse()
+    .find((m) => m.role === "user" && m.id !== "welcome");
+  if (!recent) return null;
+  const t = recent.content.trim();
+  return t.length > 72 ? `${t.slice(0, 70)}…` : t;
+}
+
 function renderContent(text: string) {
   return text.split("\n").map((line, i) => {
     const html = line.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
@@ -98,28 +109,35 @@ function renderContent(text: string) {
   });
 }
 
-function SearchingDots() {
+function SearchingDots({ label }: { label: string }) {
   return (
-    <span className="inline-flex items-center gap-1.5" aria-hidden>
-      {[0, 1, 2].map((i) => (
-        <span
-          key={i}
-          className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--accent)]"
-          style={{ animation: `ts-pulse-dot 1.1s ease-in-out ${i * 0.16}s infinite` }}
-        />
-      ))}
-    </span>
+    <div className="ts-fade mr-4 flex items-center gap-3 rounded-2xl rounded-bl-md border border-[var(--line)]/60 bg-[var(--surface)]/90 px-4 py-3 text-sm text-[var(--muted)]">
+      <span className="inline-flex items-center gap-1.5" aria-hidden>
+        {[0, 1, 2].map((i) => (
+          <span
+            key={i}
+            className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--accent)]"
+            style={{
+              animation: `ts-pulse-dot 1.1s ease-in-out ${i * 0.16}s infinite`,
+            }}
+          />
+        ))}
+      </span>
+      {label}
+    </div>
   );
 }
 
 export function AssistantChat({
   userName = "Traveller",
+  userEmail = "",
   knowledgeConfidence = 0.2,
   partyType = null,
   homeLocation = null,
   preferredDestinations = [],
 }: {
   userName?: string;
+  userEmail?: string;
   knowledgeConfidence?: number;
   partyType?: string | null;
   homeLocation?: string | null;
@@ -134,16 +152,17 @@ export function AssistantChat({
         homeLocation,
         preferredDestinations,
       }),
-    [userName, knowledgeConfidence, partyType, homeLocation, preferredDestinations],
+    [
+      userName,
+      knowledgeConfidence,
+      partyType,
+      homeLocation,
+      preferredDestinations,
+    ],
   );
 
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: "welcome",
-      role: "assistant",
-      content: `${welcome.greeting}\n\n${welcome.body}`,
-    },
-  ]);
+  const [ready, setReady] = useState(false);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [conversationId, setConversationId] = useState<string | undefined>();
   const [travelRequestId, setTravelRequestId] = useState<string | undefined>();
@@ -156,12 +175,57 @@ export function AssistantChat({
   const [started, setStarted] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const emailKey = userEmail.toLowerCase().trim();
 
-  const showHero = !started && messages.length <= 1;
+  // Restore conversation from device memory (survives refresh / PWA reopen)
+  useEffect(() => {
+    const mem = readChatMemory(emailKey || undefined);
+    if (mem?.messages?.length) {
+      setMessages(mem.messages);
+      setConversationId(mem.conversationId);
+      setTravelRequestId(mem.travelRequestId);
+      setPriorBrief(mem.priorBrief ?? null);
+      const hasRealChat = mem.messages.some(
+        (m) => m.role === "user" || (m.role === "assistant" && m.id !== "welcome"),
+      );
+      setStarted(hasRealChat);
+    } else {
+      setMessages([
+        {
+          id: "welcome",
+          role: "assistant",
+          content: `${welcome.greeting}\n\n${welcome.body}`,
+        },
+      ]);
+      setStarted(false);
+    }
+    setReady(true);
+  }, [emailKey, welcome.greeting, welcome.body]);
+
+  // Persist thread whenever it changes
+  useEffect(() => {
+    if (!ready || !emailKey || !messages.length) return;
+    writeChatMemory({
+      email: emailKey,
+      conversationId,
+      travelRequestId,
+      priorBrief,
+      messages,
+      updatedAt: Date.now(),
+    });
+  }, [
+    ready,
+    emailKey,
+    conversationId,
+    travelRequestId,
+    priorBrief,
+    messages,
+  ]);
 
   useEffect(() => {
+    if (!ready) return;
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, pending]);
+  }, [messages, pending, ready]);
 
   useEffect(() => {
     fetch("/api/ai/status")
@@ -170,9 +234,12 @@ export function AssistantChat({
       .catch(() => setAiOn(false));
   }, []);
 
+  const showHero = ready && !started && messages.length <= 1;
+  const topic = lastTopicHint(messages);
+
   function send(text: string) {
     const trimmed = text.trim();
-    if (!trimmed || pending) return;
+    if (!trimmed || pending || !ready) return;
 
     setStarted(true);
     const userMsg: ChatMessage = {
@@ -180,9 +247,12 @@ export function AssistantChat({
       role: "user",
       content: trimmed,
     };
-    setMessages((m) => [...m, userMsg]);
+    const nextMessages = [...messages, userMsg];
+    setMessages(nextMessages);
     setInput("");
     setEnquireMsg(null);
+
+    const history = historyForModel(nextMessages);
 
     startTransition(async () => {
       try {
@@ -193,6 +263,7 @@ export function AssistantChat({
             message: trimmed,
             conversationId,
             priorBrief,
+            history,
           }),
         });
         const data = await res.json();
@@ -253,9 +324,32 @@ export function AssistantChat({
     }
   }
 
+  function startFresh() {
+    clearChatMemory();
+    setConversationId(undefined);
+    setTravelRequestId(undefined);
+    setPriorBrief(null);
+    setEnquireMsg(null);
+    setStarted(false);
+    setMessages([
+      {
+        id: "welcome",
+        role: "assistant",
+        content: `${welcome.greeting}\n\n${welcome.body}`,
+      },
+    ]);
+  }
+
+  if (!ready) {
+    return (
+      <div className="flex min-h-[100dvh] items-center justify-center text-sm text-[var(--muted)]">
+        Picking up where we left off…
+      </div>
+    );
+  }
+
   return (
     <div className="relative flex min-h-[100dvh] flex-col overflow-hidden">
-      {/* Ambient motion plane */}
       <div
         aria-hidden
         className="pointer-events-none absolute inset-0 -z-10 overflow-hidden"
@@ -274,11 +368,21 @@ export function AssistantChat({
               {APP_NAME}
             </p>
             <p className="mt-1 truncate text-xs text-[var(--muted)] sm:text-sm">
-              Live market · India
-              {aiOn ? " · AI on" : aiOn === false ? " · AI off" : ""}
+              {started && topic
+                ? `Continuing · ${topic}`
+                : `Live market · India${aiOn ? " · AI on" : aiOn === false ? " · AI off" : ""}`}
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-3">
+            {started ? (
+              <button
+                type="button"
+                className="text-xs text-[var(--muted)] underline-offset-2 hover:text-[var(--ink)] hover:underline"
+                onClick={startFresh}
+              >
+                New chat
+              </button>
+            ) : null}
             <a
               href="/profile"
               className="text-xs text-[var(--muted)] underline-offset-2 hover:text-[var(--ink)] hover:underline"
@@ -290,6 +394,7 @@ export function AssistantChat({
               className="text-xs text-[var(--muted)] underline-offset-2 hover:text-[var(--ink)] hover:underline"
               onClick={async () => {
                 clearProfileBackup();
+                clearChatMemory();
                 await fetch("/api/auth", { method: "DELETE" });
                 window.location.href = "/login";
               }}
@@ -375,12 +480,6 @@ export function AssistantChat({
                                 : ""}
                             </p>
                             <p className="mt-1 text-sm">{item.reason}</p>
-                            <p className="mt-1 text-xs text-[var(--muted)]">
-                              Source: {item.option.source.name}
-                              {item.option.player?.reviewCount
-                                ? ` · ${item.option.player.reviewCount} reviews`
-                                : ""}
-                            </p>
                             {item.option.source.url ? (
                               <a
                                 href={item.option.source.url}
@@ -413,10 +512,7 @@ export function AssistantChat({
               </div>
             ))}
             {pending && (
-              <div className="ts-fade mr-4 flex items-center gap-3 rounded-2xl rounded-bl-md border border-[var(--line)]/60 bg-[var(--surface)]/90 px-4 py-3 text-sm text-[var(--muted)]">
-                <SearchingDots />
-                Searching live market listings…
-              </div>
+              <SearchingDots label="Listening to the thread… crafting a reply" />
             )}
             {enquireMsg && (
               <p className="ts-fade border border-[var(--accent)]/30 bg-[var(--accent-soft)] px-3 py-2 text-sm">
@@ -441,7 +537,7 @@ export function AssistantChat({
             placeholder={
               showHero
                 ? "Type a trip — e.g. Goa, 5 days, 50k…"
-                : "Ask a follow-up or new destination…"
+                : "Continue the conversation…"
             }
             className="min-w-0 flex-1 bg-transparent px-1 py-2.5 text-[15px] outline-none placeholder:text-[var(--muted)]"
             disabled={pending}

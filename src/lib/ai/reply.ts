@@ -15,6 +15,7 @@ export async function craftAssistantReply(input: {
   totalFound?: number;
   userMessage?: string;
   conversationKind?: "travel_plan" | "chat" | "profile" | "meta";
+  history?: Array<{ role: "user" | "assistant"; content: string }>;
   fallback: string;
 }): Promise<string> {
   const openai = getOpenAI();
@@ -22,21 +23,24 @@ export async function craftAssistantReply(input: {
 
   try {
     const system = `You are TripSaathi — a sharp personal travel companion for India.
-Tone: natural chat with a smart friend. Not a call-center script. Not a brochure.
+Tone: natural chat with a smart friend continuing an ongoing conversation. Not a call-center script.
 
 Core behaviour:
-- Answer the user's ACTUAL message. Do not force trip planning.
-- If they ask their name, prefs, or what you remember — answer from customer profile. Be specific.
-- If they greet or make small talk — respond warmly in 1–2 sentences. You may lightly invite a trip idea, but never demand destination/duration/budget.
+- You HAVE conversation history. Use it. Refer to what they already said (name, beach wish, destination, budget…) when relevant.
+- Never pretend this is a brand-new chat if history exists.
+- Answer the user's ACTUAL latest message in context of prior turns.
+- Do not force trip planning. If they chat, chat back.
+- If they ask name/prefs/what you remember — use customer profile + history.
 - Only ask trip-clarifying questions when stage is clarify AND they are clearly planning a trip.
 - Never invent hotels/prices/operators — only use provided shortlist data.
-- Do NOT open with "Hi {name}" every turn. Use their name only when they asked about it, or once for warmth if natural.
-- English. Light **bold** ok. No emojis. Keep chat replies under ~60 words unless shortlist.`;
+- Do NOT open with "Hi {name}" every turn.
+- English. Light **bold** ok. No emojis. Chat replies under ~70 words unless shortlist.`;
 
     const payload = {
       stage: input.stage,
       conversationKind: input.conversationKind || "travel_plan",
       userMessage: input.userMessage,
+      recentHistory: (input.history || []).slice(-12),
       customer: {
         displayName: input.profile.displayName || null,
         home: input.profile.homeLocation,
@@ -66,22 +70,27 @@ Core behaviour:
       totalFound: input.totalFound,
     };
 
+    const historyMsgs = (input.history || []).slice(-10).map((h) => ({
+      role: h.role as "user" | "assistant",
+      content: h.content,
+    }));
+
     const completion = await openai.chat.completions.create({
       model: defaultModel(),
-      temperature: input.stage === "chat" ? 0.6 : 0.45,
-      max_tokens: input.stage === "chat" ? 160 : 280,
+      temperature: input.stage === "chat" ? 0.55 : 0.4,
+      max_tokens: input.stage === "chat" ? 180 : 280,
       messages: [
         { role: "system", content: system },
+        ...historyMsgs,
         {
           role: "user",
-          content: `Write the next assistant message only (no preamble):\n${JSON.stringify(payload)}`,
+          content: `Latest user message to answer (use history above; do not ignore it):\n${input.userMessage || ""}\n\nContext JSON:\n${JSON.stringify(payload)}`,
         },
       ],
     });
 
     const text = completion.choices[0]?.message?.content?.trim();
     if (!text) return input.fallback;
-    // Only strip greeting spam on travel turns — name answers need the name
     if (input.stage === "chat" && input.conversationKind === "profile") {
       return text;
     }

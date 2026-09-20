@@ -30,6 +30,7 @@ export default async function Home() {
       userName={
         profile.displayName || user?.name || session.email.split("@")[0] || "Traveller"
       }
+      userEmail={session.email}
       knowledgeConfidence={profile.knowledgeConfidence ?? 0.2}
       partyType={profile.partyType}
       homeLocation={profile.homeLocation}

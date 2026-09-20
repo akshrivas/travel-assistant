@@ -41,6 +41,16 @@ const bodySchema = z.object({
   conversationId: z.string().optional(),
   /** Client-held brief — survives ephemeral Vercel SQLite cold starts */
   priorBrief: briefSchema,
+  /** Recent chat turns for conversational memory */
+  history: z
+    .array(
+      z.object({
+        role: z.enum(["user", "assistant"]),
+        content: z.string().max(4000),
+      }),
+    )
+    .max(24)
+    .optional(),
 });
 
 function briefFromRequest(priorReq: {
@@ -178,6 +188,7 @@ export async function POST(req: Request) {
       message: parsed.data.message,
       priorBrief,
       profile,
+      history: parsed.data.history,
     });
 
     const requestData = {

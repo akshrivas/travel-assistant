@@ -62,6 +62,7 @@ export async function understandWithAi(input: {
   message: string;
   priorBrief?: TravelEnquiryBrief | null;
   profile?: CustomerProfileView | null;
+  history?: Array<{ role: "user" | "assistant"; content: string }>;
 }): Promise<AiUnderstandResult> {
   const ruleKind = detectConversationKind(input.message);
   const fallback = (() => {
@@ -85,25 +86,26 @@ export async function understandWithAi(input: {
     const profile = input.profile;
     const system = `You are the understanding layer of a Personal Travel Assistant (India).
 First classify conversationKind, THEN extract a travel brief only if relevant.
+You receive recent conversation history — use it so follow-ups stay coherent
+(e.g. user said they haven't seen the sea → beach interest).
 
 conversationKind:
-- travel_plan — user is planning / refining a trip (destination, dates, budget, stays…)
-- profile — asking about their name, prefs, what you remember about them
-- meta — asking what you are / how you work
-- chat — greetings, thanks, jokes, general talk, identity questions that aren't trip planning
+- travel_plan — planning / refining a trip
+- profile — name, prefs, what you remember
+- meta — what you are / how you work
+- chat — greetings, thanks, general talk, wishes without a concrete trip ask yet
 
 Critical rules:
-- If conversationKind is NOT travel_plan: set confidence=0, missingInformation=[], do NOT invent destination/duration/budget needs.
-- Prefer English field values.
-- Budget numbers in INR absolute amounts (60000 not 60).
-- One-off budget ("this time", "is baar") → temporary + budgetMin/Max.
-- longTermPreferenceHints only for lasting prefs ("I usually…").
+- If NOT travel_plan: confidence=0, missingInformation=[], do NOT invent trip field needs.
+- Prefer English field values. Budget in INR absolute (60000 not 60).
+- Carry forward destinations/vibe implied by recent history when user is clearly continuing that thread.
 - Do not invent destinations the user didn't imply.
 Return JSON only.`;
 
     const userPayload = {
       message: input.message,
       heuristicKind: ruleKind,
+      recentHistory: (input.history || []).slice(-10),
       priorBrief: input.priorBrief ?? null,
       customerProfile: profile
         ? {
