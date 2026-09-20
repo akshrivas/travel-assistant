@@ -36,6 +36,7 @@ export default async function Home() {
       homeLocation={profile.homeLocation}
       preferredDestinations={profile.preferredDestinations}
       preferredLanguage={profile.preferredLanguage || "hinglish"}
+      profile={profile}
     />
   );
 }

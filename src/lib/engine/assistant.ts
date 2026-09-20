@@ -3,6 +3,11 @@ import { understandWithAi } from "@/lib/ai/understand";
 import { craftAssistantReply } from "@/lib/ai/reply";
 import { isAiEnabled } from "@/lib/ai/client";
 import { formatPrice, recommendOptions } from "@/lib/engine/recommend";
+import {
+  briefReadyForSearch,
+  needsTripForm,
+  softFillFromProfile,
+} from "@/lib/engine/trip-form";
 import type {
   CustomerProfileView,
   RankedOption,
@@ -13,7 +18,13 @@ export type AssistantTurnResult = {
   reply: string;
   brief: TravelEnquiryBrief;
   shortlist: RankedOption[];
-  stage: "clarify" | "shortlist" | "empty" | "out_of_market" | "chat";
+  stage:
+    | "clarify"
+    | "shortlist"
+    | "empty"
+    | "out_of_market"
+    | "chat"
+    | "trip_form";
   profileConfidence: number;
   usedAi: boolean;
   conversationKind?: "travel_plan" | "chat" | "profile" | "meta";
@@ -34,8 +45,7 @@ const emptyProfile = (): CustomerProfileView => ({
 
 /**
  * Orchestration:
- * Understand → if chat/profile/meta, reply conversationally
- * else Clarify → Stitch market → Rank → Personalized reply
+ * Understand → chat OR destination→trip form OR search→shortlist
  */
 export async function runAssistantTurn(input: {
   message: string;
@@ -51,11 +61,10 @@ export async function runAssistantTurn(input: {
     profile,
     history,
   });
-  const brief = understood.brief;
+  let brief = softFillFromProfile(understood.brief, profile);
   const kind = understood.conversationKind;
   const profileConf = profile.knowledgeConfidence;
 
-  // —— Smart chat path: never force a trip funnel ——
   if (kind !== "travel_plan") {
     const fallback = buildChatFallback(kind, input.message, profile, history);
     const reply = await craftAssistantReply({
@@ -79,36 +88,12 @@ export async function runAssistantTurn(input: {
     };
   }
 
-  const missing: string[] = [];
-  if (!brief.destination && !brief.preferences?.vibe) missing.push("destination");
-  if (!brief.durationDays) missing.push("duration");
-  if (!brief.budgetMax && !brief.budgetMin) missing.push("budget");
-  brief.missingInformation = [
-    ...new Set([...(brief.missingInformation || []), ...missing]),
-  ];
-
-  const stillMissing = [...brief.missingInformation];
-  if (brief.destination || brief.preferences?.vibe) {
-    const i = stillMissing.indexOf("destination");
-    if (i >= 0) stillMissing.splice(i, 1);
-  }
-  if (brief.durationDays) {
-    const i = stillMissing.indexOf("duration");
-    if (i >= 0) stillMissing.splice(i, 1);
-  }
-  if (brief.budgetMax != null || brief.budgetMin != null) {
-    const i = stillMissing.indexOf("budget");
-    if (i >= 0) stillMissing.splice(i, 1);
-  }
-  brief.missingInformation = stillMissing;
-
-  const needClarify =
-    brief.confidence < 0.55 ||
-    stillMissing.includes("destination") ||
-    (stillMissing.length >= 2 && !brief.destination);
-
-  if (needClarify && stillMissing.length) {
-    const fallback = buildClarifyReply(brief, profile, stillMissing);
+  // No destination yet — ask only for that (form comes after lock)
+  if (!brief.destination && !brief.preferences?.vibe) {
+    const fallback =
+      profile.preferredLanguage === "en"
+        ? "Where in India are you thinking of going? Once destination is locked, I’ll take the rest on a short form."
+        : "India mein kahan soch rahe ho? Destination lock hote hi baaki short form pe le lunga.";
     const reply = await craftAssistantReply({
       stage: "clarify",
       conversationKind: "travel_plan",
@@ -116,12 +101,12 @@ export async function runAssistantTurn(input: {
       history,
       brief,
       profile,
-      missing: stillMissing,
+      missing: ["destination"],
       fallback,
     });
     return {
       reply,
-      brief,
+      brief: { ...brief, missingInformation: ["destination"] },
       shortlist: [],
       stage: "clarify",
       conversationKind: "travel_plan",
@@ -131,18 +116,105 @@ export async function runAssistantTurn(input: {
     };
   }
 
+  // Destination locked but trip details incomplete → form (not chat interrogation)
+  if (needsTripForm(brief) && !brief.preferences?.formCompleted) {
+    const dest = brief.destination || String(brief.preferences?.vibe || "your trip");
+    const reply =
+      profile.preferredLanguage === "en"
+        ? `**${dest}** locked. Fill the quick brief below (dates, who’s going, budget, vibe, flights) — then I’ll search the live market.`
+        : `**${dest}** lock. Neeche short form bhar do (kab/din, kaun, budget, vibe, flights) — phir live market se shortlist laata hoon.`;
+    return {
+      reply,
+      brief: {
+        ...brief,
+        missingInformation: ["duration", "budget", "travellers", "vibe"],
+        preferences: { ...brief.preferences, awaitingTripForm: true },
+      },
+      shortlist: [],
+      stage: "trip_form",
+      conversationKind: "travel_plan",
+      profileConfidence: profileConf,
+      usedAi: understood.usedAi || isAiEnabled(),
+      longTermPreferenceHints: understood.longTermPreferenceHints,
+    };
+  }
+
+  return searchAndShortlist({
+    brief,
+    profile,
+    profileConf,
+    history,
+    userMessage: input.message,
+    usedAi: understood.usedAi || isAiEnabled(),
+    longTermPreferenceHints: understood.longTermPreferenceHints,
+  });
+}
+
+/** After trip form submit — search existing market with complete brief */
+export async function runTripFormSearch(input: {
+  brief: TravelEnquiryBrief;
+  profile?: CustomerProfileView | null;
+  history?: Array<{ role: "user" | "assistant"; content: string }>;
+}): Promise<AssistantTurnResult> {
+  const profile = input.profile ?? emptyProfile();
+  const brief = {
+    ...input.brief,
+    preferences: {
+      ...(input.brief.preferences || {}),
+      formCompleted: true,
+      conversationKind: "travel_plan",
+    },
+    confidence: Math.max(input.brief.confidence || 0, 0.85),
+    missingInformation: [],
+  };
+
+  if (!briefReadyForSearch(brief)) {
+    return {
+      reply:
+        profile.preferredLanguage === "en"
+          ? "Need duration, who’s going, and a budget band before I search."
+          : "Search se pehle din, kaun jaa raha, aur budget band chahiye.",
+      brief,
+      shortlist: [],
+      stage: "trip_form",
+      conversationKind: "travel_plan",
+      profileConfidence: profile.knowledgeConfidence,
+      usedAi: false,
+      longTermPreferenceHints: null,
+    };
+  }
+
+  return searchAndShortlist({
+    brief,
+    profile,
+    profileConf: profile.knowledgeConfidence,
+    history: input.history || [],
+    userMessage: `Trip brief ready for ${brief.destination}`,
+    usedAi: isAiEnabled(),
+    longTermPreferenceHints: null,
+  });
+}
+
+async function searchAndShortlist(input: {
+  brief: TravelEnquiryBrief;
+  profile: CustomerProfileView;
+  profileConf: number;
+  history: Array<{ role: "user" | "assistant"; content: string }>;
+  userMessage: string;
+  usedAi: boolean;
+  longTermPreferenceHints: AssistantTurnResult["longTermPreferenceHints"];
+}): Promise<AssistantTurnResult> {
+  const { brief, profile, profileConf, history, userMessage } = input;
+
   const options = await discoverOptions(brief);
   if (!options.length) {
-    const vibe = brief.preferences?.vibe;
     const fallback = brief.destination
-      ? `Searched live India listings for ${brief.destination}, but nothing strong enough came back for that brief. Try a nearby area or a more flexible budget — I won’t invent inventory.`
-      : vibe
-        ? `I can search live ${String(vibe)} stays in India — which destination are you leaning toward?`
-        : "Where in India, roughly how many days, and what’s the budget?";
+      ? `Searched live India listings for ${brief.destination}, but nothing strong enough came back. Try flexible dates/budget — I won’t invent inventory.`
+      : "Need a destination to search the market.";
     const reply = await craftAssistantReply({
       stage: "empty",
       conversationKind: "travel_plan",
-      userMessage: input.message,
+      userMessage,
       history,
       brief,
       profile,
@@ -155,8 +227,8 @@ export async function runAssistantTurn(input: {
       stage: "empty",
       conversationKind: "travel_plan",
       profileConfidence: profileConf,
-      usedAi: understood.usedAi || isAiEnabled(),
-      longTermPreferenceHints: understood.longTermPreferenceHints,
+      usedAi: input.usedAi,
+      longTermPreferenceHints: input.longTermPreferenceHints,
     };
   }
 
@@ -165,7 +237,7 @@ export async function runAssistantTurn(input: {
   const reply = await craftAssistantReply({
     stage: "shortlist",
     conversationKind: "travel_plan",
-    userMessage: input.message,
+    userMessage,
     history,
     brief,
     profile,
@@ -176,13 +248,13 @@ export async function runAssistantTurn(input: {
 
   return {
     reply,
-    brief: { ...brief, confidence: Math.max(brief.confidence, 0.7) },
+    brief: { ...brief, confidence: Math.max(brief.confidence, 0.85) },
     shortlist,
     stage: "shortlist",
     conversationKind: "travel_plan",
     profileConfidence: profileConf,
-    usedAi: understood.usedAi || isAiEnabled(),
-    longTermPreferenceHints: understood.longTermPreferenceHints,
+    usedAi: input.usedAi,
+    longTermPreferenceHints: input.longTermPreferenceHints,
   };
 }
 
@@ -238,45 +310,6 @@ function buildChatFallback(
   }
 
   return "Got it — I’m following this thread. Tell me more, or share a destination whenever you want options.";
-}
-
-function buildClarifyReply(
-  brief: TravelEnquiryBrief,
-  profile: CustomerProfileView,
-  missing: string[],
-): string {
-  const known: string[] = [];
-  if (profile.partyType) known.push(`usually ${profile.partyType}`);
-  if (profile.budgetMax) {
-    known.push(
-      `usual range ~${formatPrice(profile.budgetMin ?? 0, profile.budgetCurrency ?? "INR")}–${formatPrice(profile.budgetMax, profile.budgetCurrency ?? "INR")}`,
-    );
-  }
-
-  const confLine =
-    profile.knowledgeConfidence < 0.4
-      ? "Need a couple of details so I can search the live market properly."
-      : "Got your usual prefs — just need what’s missing for this trip.";
-
-  const ask: string[] = [];
-  if (missing.includes("destination")) ask.push("Where in India?");
-  if (missing.includes("duration")) ask.push("How many days?");
-  if (missing.includes("budget")) {
-    ask.push(
-      profile.budgetMax
-        ? "Same budget band as usual, or different this time?"
-        : "Rough budget for this trip?",
-    );
-  }
-
-  return [
-    confLine,
-    known.length ? `(${known.join("; ")}.)` : null,
-    brief.destination ? `${brief.destination} noted.` : null,
-    ask.slice(0, 2).join(" "),
-  ]
-    .filter(Boolean)
-    .join(" ");
 }
 
 function buildShortlistReply(

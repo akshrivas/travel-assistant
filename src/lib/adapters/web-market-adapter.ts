@@ -42,6 +42,12 @@ export const webMarketAdapter: SourceAdapter = {
     const prefs = brief.preferences || {};
     const avoidPacked = Boolean(brief.constraints?.avoidPacked);
 
+    const needFlights = Boolean(brief.temporary?.needFlights);
+    const originCity = brief.temporary?.originCity
+      ? String(brief.temporary.originCity)
+      : "";
+    const travellers = brief.travellers || undefined;
+
     const budgetLine =
       budgetMax != null
         ? `total stay budget around INR ${budgetMin ?? Math.round(budgetMax * 0.7)}–${budgetMax}`
@@ -50,9 +56,14 @@ export const webMarketAdapter: SourceAdapter = {
     const vibeBits = [
       style ? `pace: ${style}` : null,
       party !== "travellers" ? `party: ${party}` : null,
+      travellers ? `${travellers} travellers` : null,
       avoidPacked ? "prefer quieter / less packed stays" : null,
       prefs.nature ? "nature-forward" : null,
       typeof prefs.vibe === "string" ? `vibe: ${prefs.vibe}` : null,
+      needFlights && originCity
+        ? `also note typical flight options from ${originCity} to ${dest} if found on major OTAs`
+        : null,
+      brief.datesText ? `timing: ${brief.datesText}` : null,
     ]
       .filter(Boolean)
       .join("; ");

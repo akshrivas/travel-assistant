@@ -10,9 +10,15 @@ import {
   writeChatMemory,
   type StoredChatMessage,
 } from "@/lib/auth/chat-memory";
-import type { RankedOption } from "@/lib/types/travel";
+import type { CustomerProfileView, RankedOption } from "@/lib/types/travel";
+import { TripBriefForm } from "@/components/TripBriefForm";
+import type { TripFormValues } from "@/lib/engine/trip-form";
+import type { TravelEnquiryBrief } from "@/lib/types/travel";
 
-type ChatMessage = StoredChatMessage;
+type ChatMessage = StoredChatMessage & {
+  stage?: string;
+  brief?: TravelEnquiryBrief;
+};
 
 type TripSpark = {
   label: string;
@@ -177,6 +183,7 @@ export function AssistantChat({
   homeLocation = null,
   preferredDestinations = [],
   preferredLanguage = "hinglish",
+  profile,
 }: {
   userName?: string;
   userEmail?: string;
@@ -185,7 +192,19 @@ export function AssistantChat({
   homeLocation?: string | null;
   preferredDestinations?: string[];
   preferredLanguage?: string | null;
+  profile?: CustomerProfileView;
 }) {
+  const profileView: CustomerProfileView = profile || {
+    displayName: userName,
+    homeLocation,
+    preferredLanguage: preferredLanguage || "hinglish",
+    partyType,
+    preferredDestinations,
+    knowledgeConfidence,
+    budgetCurrency: "INR",
+    preferences: {},
+    avoidances: {},
+  };
   const welcome = useMemo(
     () =>
       buildWelcome({
@@ -216,6 +235,8 @@ export function AssistantChat({
   );
   const [pending, startTransition] = useTransition();
   const [enquireMsg, setEnquireMsg] = useState<string | null>(null);
+  const [tripFormOpen, setTripFormOpen] = useState(false);
+  const [formBrief, setFormBrief] = useState<TravelEnquiryBrief | null>(null);
   const [aiOn, setAiOn] = useState<boolean | null>(null);
   const [started, setStarted] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -234,6 +255,16 @@ export function AssistantChat({
         (m) => m.role === "user" || (m.role === "assistant" && m.id !== "welcome"),
       );
       setStarted(hasRealChat);
+      const last = mem.messages[mem.messages.length - 1] as ChatMessage | undefined;
+      if (
+        last?.stage === "trip_form" &&
+        (last.brief || mem.priorBrief)
+      ) {
+        setFormBrief(
+          (last.brief || mem.priorBrief) as TravelEnquiryBrief,
+        );
+        setTripFormOpen(true);
+      }
     } else {
       setMessages([
         {
@@ -327,6 +358,12 @@ export function AssistantChat({
         setConversationId(data.conversationId);
         if (data.travelRequestId) setTravelRequestId(data.travelRequestId);
         if (data.brief) setPriorBrief(data.brief);
+        if (data.stage === "trip_form" && data.brief) {
+          setFormBrief(data.brief as TravelEnquiryBrief);
+          setTripFormOpen(true);
+        } else if (data.stage === "shortlist") {
+          setTripFormOpen(false);
+        }
         setMessages((m) => [
           ...m,
           {
@@ -334,6 +371,8 @@ export function AssistantChat({
             role: "assistant",
             content: data.reply,
             shortlist: data.shortlist,
+            stage: data.stage,
+            brief: data.brief,
           },
         ]);
       } catch {
@@ -347,6 +386,46 @@ export function AssistantChat({
         ]);
       }
     });
+  }
+
+  async function submitTripForm(values: TripFormValues) {
+    setEnquireMsg(null);
+    const history = historyForModel(messages);
+    const res = await fetch("/api/trip-brief", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        conversationId,
+        priorBrief: formBrief || priorBrief,
+        history,
+        form: values,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || "failed");
+    }
+    setConversationId(data.conversationId);
+    if (data.travelRequestId) setTravelRequestId(data.travelRequestId);
+    if (data.brief) setPriorBrief(data.brief);
+    setTripFormOpen(false);
+    setFormBrief(null);
+    setMessages((m) => [
+      ...m,
+      {
+        id: `u-form-${Date.now()}`,
+        role: "user",
+        content: `Trip brief locked: ${values.destination}, ${values.durationDays} days, ${values.partyType} ×${values.travellers}, ~₹${values.budgetMax.toLocaleString("en-IN")}${values.needFlights ? `, flights from ${values.originCity}` : ""}`,
+      },
+      {
+        id: `a-${Date.now()}`,
+        role: "assistant",
+        content: data.reply,
+        shortlist: data.shortlist,
+        stage: data.stage,
+        brief: data.brief,
+      },
+    ]);
   }
 
   async function enquire(option: RankedOption) {
@@ -375,6 +454,8 @@ export function AssistantChat({
     setTravelRequestId(undefined);
     setPriorBrief(null);
     setEnquireMsg(null);
+    setTripFormOpen(false);
+    setFormBrief(null);
     setStarted(false);
     setMessages([
       {
@@ -502,6 +583,17 @@ export function AssistantChat({
                 }
               >
                 <div className="text-[15px]">{renderContent(msg.content)}</div>
+                {msg.stage === "trip_form" &&
+                tripFormOpen &&
+                formBrief &&
+                msg.id === messages[messages.length - 1]?.id ? (
+                  <TripBriefForm
+                    brief={formBrief}
+                    profile={profileView}
+                    lang={preferredLanguage}
+                    onSubmit={submitTripForm}
+                  />
+                ) : null}
                 {msg.shortlist && msg.shortlist.length > 0 && (
                   <div className="mt-4 space-y-3">
                     {msg.shortlist.map((item) => (
