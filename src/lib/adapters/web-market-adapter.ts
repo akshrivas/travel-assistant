@@ -190,7 +190,11 @@ Aim for 5 options. Prices should be approximate INR totals for the stay when pos
 function sanitizeListingUrl(url: string): string | undefined {
   try {
     const u = new URL(url);
+    if (!/^https?:$/i.test(u.protocol)) return undefined;
     const path = u.pathname.toLowerCase();
+    if (path.endsWith(".pdf") || path.endsWith(".doc") || path.endsWith(".docx")) {
+      return undefined;
+    }
     // Drop obvious category / search result pages
     if (
       /\/hotels\/?\d*-?star-hotels-in-/.test(path) ||
