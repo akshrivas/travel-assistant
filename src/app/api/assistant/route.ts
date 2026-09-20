@@ -164,14 +164,52 @@ export async function POST(req: Request) {
           stage: result.stage,
           shortlist: result.shortlist,
           brief: result.brief,
+          usedAi: result.usedAi,
         }),
       },
     });
+
+    // US-018 safe learning: only apply explicit long-term hints from AI
+    if (result.longTermPreferenceHints && user.profile) {
+      const hints = result.longTermPreferenceHints;
+      const prefs = {
+        ...JSON.parse(user.profile.preferencesJson || "{}"),
+      } as Record<string, unknown>;
+      const avoids = {
+        ...JSON.parse(user.profile.avoidancesJson || "{}"),
+      } as Record<string, unknown>;
+
+      if (hints.pace) prefs.pace = hints.pace;
+      if (hints.hotel) prefs.hotel = hints.hotel;
+      if (hints.interests?.length) {
+        const prev = Array.isArray(prefs.interests)
+          ? (prefs.interests as string[])
+          : [];
+        prefs.interests = [...new Set([...prev, ...hints.interests])];
+      }
+      if (hints.avoidances?.length) {
+        for (const a of hints.avoidances) avoids[a] = true;
+      }
+
+      await prisma.profile.update({
+        where: { userId: user.id },
+        data: {
+          partyType: hints.partyType || user.profile.partyType,
+          preferencesJson: JSON.stringify(prefs),
+          avoidancesJson: JSON.stringify(avoids),
+          knowledgeConfidence: Math.min(
+            0.95,
+            (user.profile.knowledgeConfidence || 0.2) + 0.05,
+          ),
+        },
+      });
+    }
 
     return NextResponse.json({
       conversationId,
       travelRequestId: request.id,
       userId: user.id,
+      aiEnabled: result.usedAi,
       ...result,
     });
   } catch (err) {

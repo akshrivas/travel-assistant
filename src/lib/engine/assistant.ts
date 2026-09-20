@@ -1,8 +1,7 @@
 import { discoverOptions } from "@/lib/adapters/registry";
-import {
-  mergeBriefs,
-  understandTravelEnquiry,
-} from "@/lib/engine/understand";
+import { understandWithAi } from "@/lib/ai/understand";
+import { craftAssistantReply } from "@/lib/ai/reply";
+import { isAiEnabled } from "@/lib/ai/client";
 import { formatPrice, recommendOptions } from "@/lib/engine/recommend";
 import type {
   CustomerProfileView,
@@ -16,6 +15,15 @@ export type AssistantTurnResult = {
   shortlist: RankedOption[];
   stage: "clarify" | "shortlist" | "empty" | "out_of_market";
   profileConfidence: number;
+  usedAi: boolean;
+  /** Safe long-term hints only — caller may merge carefully into profile */
+  longTermPreferenceHints?: {
+    partyType?: string | null;
+    pace?: string | null;
+    interests?: string[] | null;
+    avoidances?: string[] | null;
+    hotel?: string | null;
+  } | null;
 };
 
 const emptyProfile = (): CustomerProfileView => ({
@@ -25,8 +33,8 @@ const emptyProfile = (): CustomerProfileView => ({
 });
 
 /**
- * M1 orchestration:
- * Understand → (ask if needed) → Stitch market → Compare → Shortlist
+ * Orchestration:
+ * Understand (AI+rules) → Clarify if needed → Stitch market → Rank → Personalized reply
  */
 export async function runAssistantTurn(input: {
   message: string;
@@ -34,59 +42,96 @@ export async function runAssistantTurn(input: {
   profile?: CustomerProfileView | null;
 }): Promise<AssistantTurnResult> {
   const profile = input.profile ?? emptyProfile();
-  const extracted = understandTravelEnquiry(input.message, input.priorBrief ?? undefined);
-  const brief = input.priorBrief
-    ? mergeBriefs(input.priorBrief, extracted)
-    : extracted;
+  const understood = await understandWithAi({
+    message: input.message,
+    priorBrief: input.priorBrief,
+    profile,
+  });
+  const brief = understood.brief;
 
-  // Recompute missing on merged
   const missing: string[] = [];
   if (!brief.destination && !brief.preferences?.vibe) missing.push("destination");
   if (!brief.durationDays) missing.push("duration");
   if (!brief.budgetMax && !brief.budgetMin) missing.push("budget");
-  brief.missingInformation = missing;
+  brief.missingInformation = [...new Set([...(brief.missingInformation || []), ...missing])];
+
+  // Recompute missing after profile soft-fill from AI layer
+  const stillMissing = [...brief.missingInformation];
+  if (brief.destination || brief.preferences?.vibe) {
+    const i = stillMissing.indexOf("destination");
+    if (i >= 0) stillMissing.splice(i, 1);
+  }
+  if (brief.durationDays) {
+    const i = stillMissing.indexOf("duration");
+    if (i >= 0) stillMissing.splice(i, 1);
+  }
+  if (brief.budgetMax != null || brief.budgetMin != null) {
+    const i = stillMissing.indexOf("budget");
+    if (i >= 0) stillMissing.splice(i, 1);
+  }
+  brief.missingInformation = stillMissing;
 
   const profileConf = profile.knowledgeConfidence;
   const needClarify =
     brief.confidence < 0.55 ||
-    missing.includes("destination") ||
-    (missing.length >= 2 && !brief.destination);
+    stillMissing.includes("destination") ||
+    (stillMissing.length >= 2 && !brief.destination);
 
-  if (needClarify && missing.length) {
+  if (needClarify && stillMissing.length) {
+    const fallback = buildClarifyReply(brief, profile, stillMissing);
+    const reply = await craftAssistantReply({
+      stage: "clarify",
+      brief,
+      profile,
+      missing: stillMissing,
+      fallback,
+    });
     return {
-      reply: buildClarifyReply(brief, profile, missing),
+      reply,
       brief,
       shortlist: [],
       stage: "clarify",
       profileConfidence: profileConf,
+      usedAi: understood.usedAi || isAiEnabled(),
+      longTermPreferenceHints: understood.longTermPreferenceHints,
     };
   }
 
   const options = await discoverOptions(brief);
   if (!options.length) {
     const vibe = brief.preferences?.vibe;
-    if (!brief.destination && vibe) {
-      return {
-        reply: `I can look for ${String(vibe)} trips in India — which destination are you leaning toward, or should I shortlist a few strong regions?`,
-        brief: { ...brief, missingInformation: ["destination"] },
-        shortlist: [],
-        stage: "clarify",
-        profileConfidence: profileConf,
-      };
-    }
+    const fallback = brief.destination
+      ? `I searched available India market sources for ${brief.destination}, but I don’t have strong options yet for that brief. Share a nearby destination or a flexible budget and I’ll try again — I won’t invent inventory.`
+      : vibe
+        ? `I can look for ${String(vibe)} trips in India — which destination are you leaning toward?`
+        : "Tell me where in India you’d like to go, roughly how many days, and your budget.";
+    const reply = await craftAssistantReply({
+      stage: "empty",
+      brief,
+      profile,
+      fallback,
+    });
     return {
-      reply: brief.destination
-        ? `I searched available India market sources for ${brief.destination}, but I don’t have strong options yet for that brief. Share a nearby destination or a flexible budget and I’ll try again — I won’t invent inventory.`
-        : "Tell me where in India you’d like to go (or a vibe like beach / mountains), roughly how many days, and your budget — I’ll compare what’s available.",
+      reply,
       brief,
       shortlist: [],
       stage: "empty",
       profileConfidence: profileConf,
+      usedAi: understood.usedAi || isAiEnabled(),
+      longTermPreferenceHints: understood.longTermPreferenceHints,
     };
   }
 
   const shortlist = recommendOptions(options, brief, profile);
-  const reply = buildShortlistReply(brief, profile, shortlist, options.length);
+  const fallback = buildShortlistReply(brief, profile, shortlist, options.length);
+  const reply = await craftAssistantReply({
+    stage: "shortlist",
+    brief,
+    profile,
+    shortlist,
+    totalFound: options.length,
+    fallback,
+  });
 
   return {
     reply,
@@ -94,6 +139,8 @@ export async function runAssistantTurn(input: {
     shortlist,
     stage: "shortlist",
     profileConfidence: profileConf,
+    usedAi: understood.usedAi || isAiEnabled(),
+    longTermPreferenceHints: understood.longTermPreferenceHints,
   };
 }
 
@@ -117,9 +164,7 @@ function buildClarifyReply(
       : "I already know some of what you usually prefer; I just need what’s missing for this trip.";
 
   const ask: string[] = [];
-  if (missing.includes("destination")) {
-    ask.push("Where in India do you want to go?");
-  }
+  if (missing.includes("destination")) ask.push("Where in India do you want to go?");
   if (missing.includes("duration")) ask.push("How many days?");
   if (missing.includes("budget")) {
     ask.push(
@@ -128,17 +173,15 @@ function buildClarifyReply(
         : "What’s your approximate budget for this trip?",
     );
   }
-  if (missing.includes("travellers") && !brief.partyType) {
-    ask.push("Solo, couple, family, or friends?");
-  }
 
-  const parts = [
+  return [
     confLine,
     known.length ? `So far: ${known.join("; ")}.` : null,
     brief.destination ? `Destination noted: ${brief.destination}.` : null,
     ask.slice(0, 2).join(" "),
-  ];
-  return parts.filter(Boolean).join(" ");
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
 function buildShortlistReply(
@@ -157,8 +200,7 @@ function buildShortlistReply(
     const player = r.option.player
       ? ` · ${r.option.player.name} (${r.option.player.rating ?? "–"}★)`
       : "";
-    const fresh = ` · checked ${new Date(r.option.source.lastCheckedAt).toLocaleString("en-IN", { hour: "2-digit", minute: "2-digit" })}`;
-    return `${i + 1}. **${r.label ?? "Option"}** — ${r.option.destination}, ${r.option.durationDays} days, ${price}${player}\n   ${r.reason}${fresh}\n   Source: ${r.option.source.name}`;
+    return `${i + 1}. **${r.label ?? "Option"}** — ${r.option.destination}, ${r.option.durationDays} days, ${price}${player}\n   ${r.reason}`;
   });
 
   const budgetNote =
@@ -167,10 +209,10 @@ function buildShortlistReply(
       : "";
 
   return [
-    `I compared ${totalFound} available options from market sources and shortlisted ${shortlist.length} strong deals ${who}${budgetNote}:`,
+    `I compared ${totalFound} available options and shortlisted ${shortlist.length} strong deals ${who}${budgetNote}:`,
     "",
     ...lines,
     "",
-    "Prices and inclusions are as reported by sources and subject to confirmation. Tell me which option interests you and I’ll help you enquire/connect — I don’t invent inventory; I stitch what’s already working.",
+    "Prices are as reported by sources and subject to confirmation. Which one should I enquire about?",
   ].join("\n");
 }

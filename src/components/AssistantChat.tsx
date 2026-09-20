@@ -53,11 +53,19 @@ export function AssistantChat({
   const [travelRequestId, setTravelRequestId] = useState<string | undefined>();
   const [pending, startTransition] = useTransition();
   const [enquireMsg, setEnquireMsg] = useState<string | null>(null);
+  const [aiOn, setAiOn] = useState<boolean | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, pending]);
+
+  useEffect(() => {
+    fetch("/api/ai/status")
+      .then((r) => r.json())
+      .then((d) => setAiOn(Boolean(d.enabled)))
+      .catch(() => setAiOn(false));
+  }, []);
 
   function send(text: string) {
     const trimmed = text.trim();
@@ -149,6 +157,17 @@ export function AssistantChat({
             </p>
           </div>
           <div className="flex items-center gap-3">
+            {aiOn !== null && (
+              <span
+                className={
+                  aiOn
+                    ? "text-[10px] uppercase tracking-wide text-[var(--accent)]"
+                    : "text-[10px] uppercase tracking-wide text-[var(--muted)]"
+                }
+              >
+                {aiOn ? "AI on" : "AI off"}
+              </span>
+            )}
             <p className="hidden text-xs text-[var(--muted)] sm:block">
               Hi {userName}
             </p>
