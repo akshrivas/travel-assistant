@@ -2,7 +2,7 @@ import { discoverOptions } from "@/lib/adapters/registry";
 import { understandWithAi } from "@/lib/ai/understand";
 import { craftAssistantReply } from "@/lib/ai/reply";
 import { isAiEnabled } from "@/lib/ai/client";
-import { formatPrice, recommendOptions } from "@/lib/engine/recommend";
+import { recommendOptions } from "@/lib/engine/recommend";
 import {
   briefReadyForSearch,
   softFillFromProfile,
@@ -412,17 +412,8 @@ async function searchAndShortlist(input: {
 
   const shortlist = recommendOptions(options, brief, profile);
   const fallback = buildShortlistReply(brief, profile, shortlist, options.length);
-  const reply = await craftAssistantReply({
-    stage: "shortlist",
-    conversationKind: "travel_plan",
-    userMessage,
-    history,
-    brief,
-    profile,
-    shortlist,
-    totalFound: options.length,
-    fallback,
-  });
+  // Deterministic shortlist copy — AI was inventing prices/URLs that fought the cards
+  const reply = fallback;
 
   return {
     reply,
@@ -493,21 +484,14 @@ function buildChatFallback(
 function buildShortlistReply(
   brief: TravelEnquiryBrief,
   profile: CustomerProfileView,
-  shortlist: RankedOption[],
+  _shortlist: RankedOption[],
   totalFound: number,
 ): string {
+  const count = Math.min(3, _shortlist.length || 3);
   const who =
     profile.knowledgeConfidence >= 0.5
       ? "based on what I know about you and this trip"
       : "based on this trip brief";
-
-  const lines = shortlist.map((r, i) => {
-    const price = formatPrice(r.option.price.amount, r.option.price.currency);
-    const player = r.option.player
-      ? ` · ${r.option.player.name} (${r.option.player.rating ?? "–"}★)`
-      : "";
-    return `${i + 1}. **${r.label ?? "Option"}** — ${r.option.destination}, ${r.option.durationDays} days, ${price}${player}\n   ${r.reason}`;
-  });
 
   const budgetNote =
     brief.temporary?.budgetMax != null
@@ -515,10 +499,8 @@ function buildShortlistReply(
       : "";
 
   return [
-    `Market se ${totalFound} hotel listings dekhi — yeh **${shortlist.length} best hotel quotations** ${who}${budgetNote}:`,
+    `Live market se ${totalFound} hotel listings check ki — **${count} best quotations** neeche cards mein hain ${who}${budgetNote}.`,
     "",
-    ...lines,
-    "",
-    "Prices/availability change ho sakti hai — listing pe confirm karo. Kaunsi pe enquire?",
+    "Price listing pe confirm karo (change ho sakti hai). Enquire dabao → connect path + listing khulegi.",
   ].join("\n");
 }

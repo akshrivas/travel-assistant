@@ -282,36 +282,75 @@ export async function POST(req: Request) {
     if (request) travelRequestId = request.id;
 
     let enquiryMessage: string | null = null;
+    let enquiryPayload: {
+      id: string;
+      status: string;
+      statusLabel: string;
+      hotelName: string;
+      destination: string;
+      durationDays: number | null;
+      location: string | null;
+      priceLabel: string;
+      provider: string;
+      listingUrl: string | null;
+      rating: number | null;
+      reviewCount: number | null;
+      nextStep: string;
+    } | null = null;
+
     if (
       request &&
       result.selectedOption &&
       (result.stage === "selected" || result.stage === "enquire")
     ) {
+      const opt = result.selectedOption.option;
+      const hotelName = opt.stay?.name || opt.destination;
+      const listingUrl = opt.source?.url || null;
+      const provider = opt.player?.name || opt.source?.name || "Market listing";
+      const amount = opt.price?.amount || 0;
+      const priceLabel =
+        amount >= 1500 && amount < 5_000_000
+          ? `₹${amount.toLocaleString("en-IN")}`
+          : "See listing";
+      const nextStep = listingUrl
+        ? "Listing kholo — wahan dates/guests confirm karke book/enquire karo. Hum OTA nahi; connect path yahi hai."
+        : "Provider listing URL nahi mili — shortlist se dusra option try karo.";
+
       const enquiry = await safePersist("enquiry", () =>
         prisma.enquiry.create({
           data: {
             travelRequestId: request.id,
-            optionId: result.selectedOption!.option.id,
-            optionSnapshot: JSON.stringify(result.selectedOption!.option),
+            optionId: opt.id,
+            optionSnapshot: JSON.stringify(opt),
             status: "pending",
-            providerRef: String(
-              result.selectedOption!.option.source?.name ?? "unknown",
-            ),
+            providerRef: String(provider),
           },
         }),
       );
       if (enquiry) {
-        enquiryMessage =
-          result.stage === "enquire"
-            ? result.reply
-            : `Enquiry created for ${result.selectedOption.option.stay?.name || result.selectedOption.option.destination}. We’ll connect this to the provider for a quotation — subject to confirmation.`;
+        enquiryPayload = {
+          id: enquiry.id,
+          status: "pending",
+          statusLabel: "Pending · connect on listing",
+          hotelName,
+          destination: opt.destination,
+          durationDays: opt.durationDays ?? null,
+          location: opt.stay?.location || null,
+          priceLabel,
+          provider,
+          listingUrl,
+          rating: opt.player?.rating ?? null,
+          reviewCount: opt.player?.reviewCount ?? null,
+          nextStep,
+        };
+        enquiryMessage = `**${hotelName}** enquiry saved · status Pending.`;
         await safePersist("signal-enquire", () =>
           prisma.behaviourSignal.create({
             data: {
               userId: dbUser.id,
               type: "save",
               payloadJson: JSON.stringify({
-                optionId: result.selectedOption!.option.id,
+                optionId: opt.id,
                 enquiryId: enquiry.id,
               }),
             },
@@ -413,6 +452,7 @@ export async function POST(req: Request) {
       userId: dbUser.id,
       aiEnabled: result.usedAi,
       enquiryMessage,
+      enquiry: enquiryPayload,
       ...result,
     });
   } catch (err) {

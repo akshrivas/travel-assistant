@@ -1,5 +1,6 @@
 import { defaultModel, getOpenAI } from "@/lib/ai/client";
 import type { SourceAdapter } from "@/lib/adapters/types";
+import { sanitizeStayPrice } from "@/lib/engine/price";
 import type {
   NormalizedTravelOption,
   SourceAdapterSearchInput,
@@ -80,7 +81,8 @@ Priority rules (strict):
 5. Diversify: mix 1 premium-fit, 1 strong value, 1 distinctive/relaxed option when possible.
 6. Do NOT invent properties, prices, ratings, or URLs. Only use what search finds.
 7. url MUST be a property-specific hotel listing page, never a city/category search results page.
-8. If a field is unknown, omit it rather than guessing wildly.
+8. price_inr MUST be the approximate TOTAL stay cost in INR for ${nights} nights (not per night, not lakhs-as-typo). Typical leisure hotels: roughly ₹8,000–₹1,50,000 for the whole stay depending on property — never crores.
+9. If a field is unknown, omit it rather than guessing wildly.
 
 Return ONLY valid JSON (no markdown):
 {"options":[{"externalId":"slug","name":"property name","location":"area, city","nights":${nights},"price_inr":number,"rating":number,"review_count":number,"url":"https://...","provider":"Booking.com|MakeMyTrip|Agoda|Hotels.com|Goibibo|Tripadvisor|Official|Other","inclusions":["..."],"cancellation":"...","tags":["relaxed","family","value"],"why":"one line why this is a strong hotel pick"}]}
@@ -112,7 +114,13 @@ Aim for 5 hotel options. Prices = approximate INR totals for the hotel stay (not
           const row = raw as Record<string, unknown>;
           const name = String(row.name || "").trim();
           if (!name) return null;
-          const price = Number(row.price_inr) || 0;
+          const rawPrice = Number(row.price_inr) || 0;
+          const nightsN = Number(row.nights) || nights;
+          const sanitized = sanitizeStayPrice(rawPrice, {
+            budgetMax: budgetMax ?? undefined,
+            nights: nightsN,
+          });
+          const price = sanitized.amount;
           const rating = row.rating != null ? Number(row.rating) : undefined;
           const normRating =
             rating != null && rating > 5
@@ -122,14 +130,16 @@ Aim for 5 hotel options. Prices = approximate INR totals for the hotel stay (not
             row.review_count != null ? Number(row.review_count) : undefined;
           const provider = normalizeProvider(String(row.provider || "Web listing"));
           const url = typeof row.url === "string" ? sanitizeListingUrl(row.url) : undefined;
-          const nightsN = Number(row.nights) || nights;
           const tags = Array.isArray(row.tags)
             ? row.tags.map(String)
             : [party, style].filter(Boolean);
           const incomplete: string[] = [];
-          if (!price) incomplete.push("price");
+          if (!price || sanitized.incomplete) incomplete.push("price");
           if (!url) incomplete.push("url");
           if (normRating == null) incomplete.push("rating");
+
+          // No usable stay total + no listing → drop (don't invent price from budget)
+          if (!price && !url) return null;
 
           const reliabilityNote = buildReliabilityNote(
             provider,
@@ -153,7 +163,7 @@ Aim for 5 hotel options. Prices = approximate INR totals for the hotel stay (not
               location: String(row.location || dest),
             },
             price: {
-              amount: price || budgetMax || 0,
+              amount: price,
               currency: "INR",
               perPerson: false,
               inclusionsNote: Array.isArray(row.inclusions)
@@ -176,7 +186,7 @@ Aim for 5 hotel options. Prices = approximate INR totals for the hotel stay (not
             travelStyleTags: tags.map((t) => t.toLowerCase()),
             source: {
               id: "web-market-search",
-              name: `Live Market · ${provider}`,
+              name: provider,
               type: "api",
               lastCheckedAt: checkedAt,
               externalId: String(row.externalId || name),

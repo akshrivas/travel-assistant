@@ -9,6 +9,7 @@ export type StoredChatMessage = {
   role: "user" | "assistant";
   content: string;
   shortlist?: RankedOption[];
+  enquiry?: Record<string, unknown>;
 };
 
 export type ChatMemory = {

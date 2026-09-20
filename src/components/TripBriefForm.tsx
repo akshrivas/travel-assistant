@@ -6,6 +6,7 @@ import {
   defaultFormValues,
   type TripFormValues,
 } from "@/lib/engine/trip-form";
+import { parseBudgetThousandsInput } from "@/lib/engine/price";
 
 const field =
   "mt-1 w-full border border-[var(--line)] bg-[var(--bg)] px-3 py-2.5 text-sm outline-none focus:border-[var(--accent)]";
@@ -151,16 +152,23 @@ export function TripBriefForm({
       </div>
 
       <label className={label}>
-        {hinglish ? "Budget band (₹ thousands — 50 = ₹50k)" : "Budget band (₹ thousands)"}
+        {hinglish
+          ? "Budget band (₹) — 50000 ya 50 (= ₹50k)"
+          : "Budget band (₹) — 50000 or 50 (= ₹50k)"}
         <input
           className={field}
           inputMode="numeric"
-          value={Math.round(values.budgetMax / 1000) || ""}
+          value={
+            values.budgetMax
+              ? values.budgetMax >= 1000
+                ? String(values.budgetMax)
+                : String(Math.round(values.budgetMax / 1000))
+              : ""
+          }
           onChange={(e) => {
-            const k = parseInt(e.target.value || "0", 10) || 0;
-            set("budgetMax", k * 1000);
+            set("budgetMax", parseBudgetThousandsInput(e.target.value));
           }}
-          placeholder="e.g. 50"
+          placeholder="e.g. 50000"
         />
       </label>
 

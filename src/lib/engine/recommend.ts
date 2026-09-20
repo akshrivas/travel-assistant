@@ -32,7 +32,16 @@ export function recommendOptions(
   const party = brief.partyType ?? profile.partyType ?? undefined;
   const style = brief.travelStyle;
 
-  const scored = options.map((option) => {
+  const scored = options
+    .filter((option) => {
+      const p = option.price.amount;
+      if (!option.stay?.name) return false;
+      if (!p || p < 1500) return false;
+      if (p > 5_000_000) return false;
+      if (budgetMax != null && p > budgetMax * 4) return false;
+      return true;
+    })
+    .map((option) => {
     let score = 0;
     const reasons: string[] = [];
 

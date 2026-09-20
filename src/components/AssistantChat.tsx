@@ -12,12 +12,18 @@ import {
 } from "@/lib/auth/chat-memory";
 import type { CustomerProfileView, RankedOption } from "@/lib/types/travel";
 import { TripBriefForm } from "@/components/TripBriefForm";
+import {
+  EnquiryReceipt,
+  type EnquiryReceiptData,
+} from "@/components/EnquiryReceipt";
 import type { TripFormValues } from "@/lib/engine/trip-form";
 import type { TravelEnquiryBrief } from "@/lib/types/travel";
+import { formatPrice } from "@/lib/engine/recommend";
 
 type ChatMessage = StoredChatMessage & {
   stage?: string;
   brief?: TravelEnquiryBrief;
+  enquiry?: EnquiryReceiptData;
 };
 
 type TripSpark = {
@@ -260,6 +266,9 @@ export function AssistantChat({
   );
   const [pending, startTransition] = useTransition();
   const [enquireMsg, setEnquireMsg] = useState<string | null>(null);
+  const [activeEnquiry, setActiveEnquiry] = useState<EnquiryReceiptData | null>(
+    null,
+  );
   const [tripFormOpen, setTripFormOpen] = useState(false);
   const [formBrief, setFormBrief] = useState<TravelEnquiryBrief | null>(null);
   const [aiOn, setAiOn] = useState<boolean | null>(null);
@@ -281,6 +290,7 @@ export function AssistantChat({
     setTravelRequestId(undefined);
     setPriorBrief(null);
     setEnquireMsg(null);
+    setActiveEnquiry(null);
     setTripFormOpen(false);
     setFormBrief(null);
   }
@@ -445,7 +455,9 @@ export function AssistantChat({
         ) {
           setTripFormOpen(false);
         }
-        if (data.enquiryMessage) setEnquireMsg(data.enquiryMessage);
+        if (data.enquiry) {
+          setActiveEnquiry(data.enquiry as EnquiryReceiptData);
+        }
         setMessages((m) => [
           ...m,
           {
@@ -455,6 +467,7 @@ export function AssistantChat({
             shortlist: data.shortlist,
             stage: data.stage,
             brief: data.brief,
+            enquiry: data.enquiry || undefined,
           },
         ]);
       } catch {
@@ -511,7 +524,14 @@ export function AssistantChat({
   }
 
   async function enquire(option: RankedOption) {
-    if (!travelRequestId) return;
+    if (!travelRequestId) {
+      setEnquireMsg(
+        preferredLanguage === "en"
+          ? "Trip request missing — submit the brief again, then enquire."
+          : "Trip request missing — pehle brief submit karo, phir enquire.",
+      );
+      return;
+    }
     setEnquireMsg(null);
     const res = await fetch("/api/enquire", {
       method: "POST",
@@ -523,10 +543,25 @@ export function AssistantChat({
       }),
     });
     const data = await res.json();
-    if (res.ok) {
-      setEnquireMsg(data.message);
+    if (res.ok && data.enquiry) {
+      const receipt = data.enquiry as EnquiryReceiptData;
+      setActiveEnquiry(receipt);
+      setEnquireMsg(null);
+      setMessages((m) => [
+        ...m,
+        {
+          id: `enq-${Date.now()}`,
+          role: "assistant",
+          content:
+            preferredLanguage === "en"
+              ? `Locked **${receipt.hotelName}** for enquire/connect.`
+              : `**${receipt.hotelName}** pe enquire/connect lock.`,
+          stage: "enquire",
+          enquiry: receipt,
+        },
+      ]);
     } else {
-      setEnquireMsg(data.error || "Enquiry failed");
+      setEnquireMsg(data.error || data.message || "Enquiry failed");
     }
   }
 
@@ -717,14 +752,23 @@ export function AssistantChat({
                     onSubmit={submitTripForm}
                   />
                 ) : null}
+                {msg.enquiry ? (
+                  <EnquiryReceipt data={msg.enquiry} lang={preferredLanguage} />
+                ) : null}
                 {msg.shortlist && msg.shortlist.length > 0 && (
                   <div className="mt-4 space-y-3">
                     {msg.shortlist.map((item) => {
-                      const selectedId = String(
-                        msg.brief?.preferences?.selectedOptionId || "",
-                      );
+                      const selectedId =
+                        activeEnquiry?.hotelName &&
+                        item.option.stay?.name === activeEnquiry.hotelName
+                          ? item.option.id
+                          : String(
+                              msg.brief?.preferences?.selectedOptionId || "",
+                            );
                       const isSelected =
                         Boolean(selectedId) && item.option.id === selectedId;
+                      const priceAmt = item.option.price.amount;
+                      const priceOk = priceAmt >= 1500 && priceAmt < 5_000_000;
                       return (
                       <div
                         key={item.option.id}
@@ -738,16 +782,19 @@ export function AssistantChat({
                           <div className="min-w-0">
                             <p className="text-xs uppercase tracking-wider text-[var(--accent)]">
                               {item.label}
-                              {isSelected ? " · Locked" : ""}
+                              {isSelected ? " · Selected" : ""}
                             </p>
-                            <p className="font-[family-name:var(--font-display)] text-lg">
+                            <p className="font-[family-name:var(--font-display)] text-lg leading-tight">
+                              {item.option.stay?.name || item.option.destination}
+                            </p>
+                            <p className="mt-0.5 text-sm text-[var(--muted)]">
                               {item.option.destination} ·{" "}
                               {item.option.durationDays} days
-                            </p>
-                            <p className="text-sm text-[var(--muted)]">
-                              {item.option.stay?.name}
-                              {item.option.player
+                              {item.option.player?.name
                                 ? ` · ${item.option.player.name}`
+                                : ""}
+                              {item.option.player?.rating != null
+                                ? ` · ${item.option.player.rating}★`
                                 : ""}
                             </p>
                             <p className="mt-1 text-sm">{item.reason}</p>
@@ -764,13 +811,17 @@ export function AssistantChat({
                           </div>
                           <div className="shrink-0 text-right">
                             <p className="font-[family-name:var(--font-display)] text-xl">
-                              ₹
-                              {item.option.price.amount.toLocaleString("en-IN")}
+                              {priceOk
+                                ? formatPrice(
+                                    priceAmt,
+                                    item.option.price.currency,
+                                  )
+                                : "See listing"}
                             </p>
                             <button
                               type="button"
                               onClick={() => enquire(item)}
-                              className="mt-2 text-sm underline underline-offset-4 hover:text-[var(--accent)]"
+                              className="mt-2 bg-[var(--accent)] px-3 py-1.5 text-sm text-[var(--sand)]"
                             >
                               {isSelected ? "Enquired" : "Enquire"}
                             </button>

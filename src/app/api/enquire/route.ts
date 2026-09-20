@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
+import { formatPrice } from "@/lib/engine/recommend";
 
 const bodySchema = z.object({
   travelRequestId: z.string(),
@@ -22,16 +23,31 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Request not found" }, { status: 404 });
     }
 
+    const snap = parsed.data.optionSnapshot as {
+      stay?: { name?: string; location?: string };
+      destination?: string;
+      durationDays?: number;
+      price?: { amount?: number; currency?: string };
+      source?: { name?: string; url?: string };
+      player?: { name?: string; rating?: number; reviewCount?: number };
+    };
+
+    const hotelName =
+      snap.stay?.name || snap.destination || "Selected hotel";
+    const listingUrl = snap.source?.url || null;
+    const provider =
+      snap.player?.name || snap.source?.name || "Market listing";
+    const amount = Number(snap.price?.amount) || 0;
+    const currency = snap.price?.currency || "INR";
+    const priceLabel = amount > 0 ? formatPrice(amount, currency) : "Price on listing";
+
     const enquiry = await prisma.enquiry.create({
       data: {
         travelRequestId: request.id,
         optionId: parsed.data.optionId,
         optionSnapshot: JSON.stringify(parsed.data.optionSnapshot),
         status: "pending",
-        providerRef: String(
-          (parsed.data.optionSnapshot as { source?: { name?: string } })?.source
-            ?.name ?? "unknown",
-        ),
+        providerRef: String(provider),
       },
     });
 
@@ -47,15 +63,35 @@ export async function POST(req: Request) {
         payloadJson: JSON.stringify({
           optionId: parsed.data.optionId,
           enquiryId: enquiry.id,
+          hotelName,
         }),
       },
     });
 
+    const nextStep = listingUrl
+      ? "Listing kholo — wahan dates/guests confirm karke book/enquire karo. Hum OTA nahi; connect path yahi hai."
+      : "Provider listing URL nahi mili — shortlist se dusra option try karo.";
+
     return NextResponse.json({
       enquiryId: enquiry.id,
       status: enquiry.status,
-      message:
-        "Enquiry created. We’ll connect this to the provider for a quotation — subject to confirmation. (V1 connect path)",
+      enquiry: {
+        id: enquiry.id,
+        status: "pending" as const,
+        statusLabel: "Pending · connect on listing",
+        hotelName,
+        destination: snap.destination || request.destination || "",
+        durationDays: snap.durationDays || request.durationDays || null,
+        location: snap.stay?.location || null,
+        priceLabel,
+        provider,
+        listingUrl,
+        rating: snap.player?.rating ?? null,
+        reviewCount: snap.player?.reviewCount ?? null,
+        createdAt: enquiry.createdAt,
+        nextStep,
+      },
+      message: `**${hotelName}** enquiry saved · status Pending. ${nextStep}`,
     });
   } catch (err) {
     console.error(err);
