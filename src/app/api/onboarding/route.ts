@@ -116,7 +116,7 @@ export async function POST(req: Request) {
   // Always persist snapshot in cookie (works across Vercel instances)
   let userId = session.userId;
   try {
-    const user = await requireUser();
+    const user = await requireUser({ allowSetCookie: true });
     if (user?.profile) {
       userId = user.id;
       await prisma.profile.update({
@@ -156,6 +156,7 @@ export async function POST(req: Request) {
   });
 
   return NextResponse.json({
+    email: session.email,
     profile: profileView,
     onboardingComplete,
   });

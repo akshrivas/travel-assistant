@@ -3,6 +3,10 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { APP_NAME, APP_TAGLINE } from "@/lib/brand";
+import {
+  readProfileBackup,
+  writeProfileBackup,
+} from "@/lib/auth/client-backup";
 
 export function LoginForm() {
   const router = useRouter();
@@ -16,11 +20,21 @@ export function LoginForm() {
     e.preventDefault();
     setError(null);
     startTransition(async () => {
+      const backup = readProfileBackup();
+      const snapshot =
+        backup && backup.email === email.toLowerCase().trim()
+          ? backup
+          : backup?.onboardingComplete
+            ? backup
+            : undefined;
+
       const res = await fetch("/api/auth", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(
-          needsCode ? { email, code } : { email },
+          needsCode
+            ? { email, code, snapshot }
+            : { email, snapshot },
         ),
       });
       const data = await res.json();
@@ -32,6 +46,15 @@ export function LoginForm() {
         setNeedsCode(true);
         return;
       }
+
+      if (data.user?.onboardingComplete && data.user?.profile) {
+        writeProfileBackup({
+          email: data.user.email || email,
+          onboardingComplete: true,
+          profile: data.user.profile,
+        });
+      }
+
       if (data.user?.onboardingComplete) {
         router.push("/");
       } else {

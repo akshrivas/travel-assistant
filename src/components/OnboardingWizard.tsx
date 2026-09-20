@@ -1,8 +1,12 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { APP_NAME } from "@/lib/brand";
+import {
+  readProfileBackup,
+  writeProfileBackup,
+} from "@/lib/auth/client-backup";
+import { useEffect, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 
 type Step = 1 | 2 | 3;
 
@@ -28,6 +32,7 @@ export function OnboardingWizard() {
   const [step, setStep] = useState<Step>(1);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [restoring, setRestoring] = useState(true);
 
   const [displayName, setDisplayName] = useState("");
   const [homeLocation, setHomeLocation] = useState("");
@@ -41,6 +46,53 @@ export function OnboardingWizard() {
   const [pace, setPace] = useState<string | null>(null);
   const [interests, setInterests] = useState<string[]>([]);
   const [avoidPacked, setAvoidPacked] = useState(false);
+
+  // If this device already finished onboarding, restore session and skip wizard
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const backup = readProfileBackup();
+      if (!backup?.onboardingComplete || !backup.profile) {
+        if (!cancelled) setRestoring(false);
+        return;
+      }
+      try {
+        const res = await fetch("/api/onboarding", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            displayName: backup.profile.displayName || undefined,
+            homeLocation: backup.profile.homeLocation || undefined,
+            preferredLanguage: backup.profile.preferredLanguage || "en",
+            partyType: backup.profile.partyType ?? null,
+            typicalDuration: backup.profile.typicalDuration ?? null,
+            budgetMin: backup.profile.budgetMin ?? null,
+            budgetMax: backup.profile.budgetMax ?? null,
+            preferredDestinations: backup.profile.preferredDestinations || [],
+            preferences: backup.profile.preferences || {},
+            avoidances: backup.profile.avoidances || {},
+            complete: true,
+          }),
+        });
+        if (res.ok && !cancelled) {
+          writeProfileBackup({
+            email: backup.email,
+            onboardingComplete: true,
+            profile: backup.profile,
+          });
+          router.replace("/");
+          router.refresh();
+          return;
+        }
+      } catch {
+        /* fall through to wizard */
+      }
+      if (!cancelled) setRestoring(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
 
   function toggleInterest(id: string) {
     setInterests((prev) =>
@@ -89,6 +141,13 @@ export function OnboardingWizard() {
           setError(data.error || "Could not save");
           return;
         }
+        if (data.email && data.profile) {
+          writeProfileBackup({
+            email: data.email,
+            onboardingComplete: Boolean(data.onboardingComplete),
+            profile: data.profile,
+          });
+        }
         if (next === "done") {
           router.push("/");
           router.refresh();
@@ -124,6 +183,19 @@ export function OnboardingWizard() {
     if (skip) {
       // still marks complete with whatever we have
     }
+  }
+
+  if (restoring) {
+    return (
+      <div className="mx-auto flex min-h-[100dvh] max-w-lg flex-col justify-center px-4 py-10">
+        <p className="font-[family-name:var(--font-display)] text-xl text-[var(--ink)]">
+          {APP_NAME}
+        </p>
+        <p className="mt-3 text-sm text-[var(--muted)]">
+          Restoring your profile…
+        </p>
+      </div>
+    );
   }
 
   return (

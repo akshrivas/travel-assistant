@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { APP_NAME, APP_TAGLINE } from "@/lib/brand";
+import { clearProfileBackup } from "@/lib/auth/client-backup";
 import type { RankedOption } from "@/lib/types/travel";
 
 type ChatMessage = {
@@ -182,6 +183,7 @@ export function AssistantChat({
               type="button"
               className="text-xs text-[var(--muted)] underline underline-offset-2"
               onClick={async () => {
+                clearProfileBackup();
                 await fetch("/api/auth", { method: "DELETE" });
                 window.location.href = "/login";
               }}
