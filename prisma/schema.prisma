@@ -49,6 +49,9 @@ model Profile {
   // Confidence: how well we know this customer (0-1)
   knowledgeConfidence Float  @default(0)
 
+  // US-010: create/continue profile; onboarding gate
+  onboardingComplete Boolean @default(false)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }

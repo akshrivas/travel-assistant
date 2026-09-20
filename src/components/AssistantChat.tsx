@@ -29,13 +29,23 @@ function renderContent(text: string) {
   });
 }
 
-export function AssistantChat() {
+export function AssistantChat({
+  userName = "Traveller",
+  knowledgeConfidence = 0.2,
+}: {
+  userName?: string;
+  knowledgeConfidence?: number;
+}) {
+  const knowLine =
+    knowledgeConfidence >= 0.45
+      ? `Hi ${userName} — I already know some of what you usually prefer. Tell me what you’re planning in India and I’ll shortlist suitable deals.`
+      : `Hi ${userName} — I’m your personal travel assistant. Tell me what you’re planning in India. I’ll compare available options and shortlist the best suitable deals for you.`;
+
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: "welcome",
       role: "assistant",
-      content:
-        "Hi — I’m your personal travel assistant. Tell me what you’re planning in India. I’ll compare available market options and shortlist the best suitable deals for you — I don’t invent inventory.",
+      content: knowLine,
     },
   ]);
   const [input, setInput] = useState("");
@@ -138,9 +148,21 @@ export function AssistantChat() {
               Personal travel assistant · India · existing market, best deals
             </p>
           </div>
-          <p className="hidden text-xs text-[var(--muted)] sm:block">
-            Customer fayda pehle
-          </p>
+          <div className="flex items-center gap-3">
+            <p className="hidden text-xs text-[var(--muted)] sm:block">
+              Hi {userName}
+            </p>
+            <button
+              type="button"
+              className="text-xs text-[var(--muted)] underline underline-offset-2"
+              onClick={async () => {
+                await fetch("/api/auth", { method: "DELETE" });
+                window.location.href = "/login";
+              }}
+            >
+              Sign out
+            </button>
+          </div>
         </div>
       </header>
 

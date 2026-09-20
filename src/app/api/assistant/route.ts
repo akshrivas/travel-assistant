@@ -1,97 +1,34 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
+import { getSessionUserId } from "@/lib/auth/session";
+import { toProfileView } from "@/lib/profile";
 import { runAssistantTurn } from "@/lib/engine/assistant";
-import type { CustomerProfileView, TravelEnquiryBrief } from "@/lib/types/travel";
+import type { TravelEnquiryBrief } from "@/lib/types/travel";
 
 const bodySchema = z.object({
   message: z.string().min(1).max(4000),
   conversationId: z.string().optional(),
 });
 
-async function ensureDemoUser() {
-  const existing = await prisma.user.findFirst({
-    where: { email: "demo@travel.assistant" },
-    include: { profile: true },
-  });
-  if (existing) return existing;
-
-  return prisma.user.create({
-    data: {
-      email: "demo@travel.assistant",
-      name: "Demo Traveller",
-      profile: {
-        create: {
-          displayName: "Asha",
-          homeLocation: "Delhi, India",
-          preferredLanguage: "en",
-          partyType: "family",
-          typicalDuration: 6,
-          budgetMin: 50000,
-          budgetMax: 80000,
-          budgetCurrency: "INR",
-          preferredDestinations: JSON.stringify(["Kashmir", "Goa", "Kerala"]),
-          preferencesJson: JSON.stringify({
-            hotel: "4-star",
-            pace: "relaxed",
-            interests: ["nature", "food"],
-          }),
-          avoidancesJson: JSON.stringify({ packedItinerary: true }),
-          knowledgeConfidence: 0.55,
-        },
-      },
-    },
-    include: { profile: true },
-  });
-}
-
-function toProfileView(
-  profile: NonNullable<Awaited<ReturnType<typeof ensureDemoUser>>["profile"]>,
-): CustomerProfileView {
-  return {
-    displayName: profile.displayName,
-    homeLocation: profile.homeLocation,
-    preferredLanguage: profile.preferredLanguage,
-    partyType: profile.partyType,
-    typicalDuration: profile.typicalDuration,
-    budgetMin: profile.budgetMin,
-    budgetMax: profile.budgetMax,
-    budgetCurrency: profile.budgetCurrency,
-    preferredDestinations: profile.preferredDestinations
-      ? (JSON.parse(profile.preferredDestinations) as string[])
-      : [],
-    preferences: JSON.parse(profile.preferencesJson || "{}") as Record<
-      string,
-      unknown
-    >,
-    avoidances: JSON.parse(profile.avoidancesJson || "{}") as Record<
-      string,
-      unknown
-    >,
-    knowledgeConfidence: profile.knowledgeConfidence,
-  };
-}
-
-function briefFromRequest(
-  priorReq: {
-    intent: string | null;
-    destination: string | null;
-    datesText: string | null;
-    durationDays: number | null;
-    travellers: number | null;
-    partyType: string | null;
-    budgetMin: number | null;
-    budgetMax: number | null;
-    budgetCurrency: string;
-    travelStyle: string | null;
-    preferencesJson: string;
-    constraintsJson: string;
-    temporaryJson: string;
-    confidence: number;
-    missingJson: string;
-    rawBrief: string | null;
-  },
-): TravelEnquiryBrief {
+function briefFromRequest(priorReq: {
+  intent: string | null;
+  destination: string | null;
+  datesText: string | null;
+  durationDays: number | null;
+  travellers: number | null;
+  partyType: string | null;
+  budgetMin: number | null;
+  budgetMax: number | null;
+  budgetCurrency: string;
+  travelStyle: string | null;
+  preferencesJson: string;
+  constraintsJson: string;
+  temporaryJson: string;
+  confidence: number;
+  missingJson: string;
+  rawBrief: string | null;
+}): TravelEnquiryBrief {
   return {
     intent: priorReq.intent ?? undefined,
     destination: priorReq.destination ?? undefined,
@@ -114,6 +51,11 @@ function briefFromRequest(
 
 export async function POST(req: Request) {
   try {
+    const userId = await getSessionUserId();
+    if (!userId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const json = await req.json();
     const parsed = bodySchema.safeParse(json);
     if (!parsed.success) {
@@ -123,8 +65,15 @@ export async function POST(req: Request) {
       );
     }
 
-    const user = await ensureDemoUser();
-    const profile = user.profile ? toProfileView(user.profile) : null;
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      include: { profile: true },
+    });
+    if (!user?.profile) {
+      return NextResponse.json({ error: "Profile required" }, { status: 400 });
+    }
+
+    const profile = toProfileView(user.profile);
 
     let conversationId = parsed.data.conversationId;
     if (!conversationId) {
