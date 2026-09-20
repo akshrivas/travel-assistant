@@ -1,4 +1,28 @@
 import { PrismaClient } from "@prisma/client";
+import fs from "fs";
+import path from "path";
+
+/**
+ * Local: file:./dev.db (from .env)
+ * Vercel/serverless: copy prepared SQLite into /tmp (writable) per instance
+ */
+function prepareDatabaseUrl(): string {
+  if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+    const target = "/tmp/travel-assistant.db";
+    const source = path.join(process.cwd(), "prisma", "deploy.db");
+    try {
+      if (!fs.existsSync(target) && fs.existsSync(source)) {
+        fs.copyFileSync(source, target);
+      }
+    } catch (err) {
+      console.error("Failed to prepare /tmp sqlite", err);
+    }
+    return `file:${target}`;
+  }
+  return process.env.DATABASE_URL || "file:./dev.db";
+}
+
+process.env.DATABASE_URL = prepareDatabaseUrl();
 
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
 
