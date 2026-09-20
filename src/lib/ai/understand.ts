@@ -2,8 +2,10 @@ import { z } from "zod";
 import { defaultModel, getOpenAI, isAiEnabled } from "@/lib/ai/client";
 import {
   detectConversationKind,
+  extractLockedDestination,
   mergeBriefs,
   understandTravelEnquiry,
+  wantsTripForm,
 } from "@/lib/engine/understand";
 import type {
   CustomerProfileView,
@@ -138,11 +140,16 @@ Return JSON only.`;
     if (!parsed.success) return fallback;
 
     const d = parsed.data;
-    // Prefer heuristic when it clearly says non-travel — don't let model force trip funnel
+    // Heuristic owns funnel gates:
+    // - travel_plan (lock / destination / form) → never let model downgrade to chat
+    // - profile / meta → never let model force trip funnel
+    // - chat → model may upgrade to travel_plan if context warrants
     const conversationKind: AiUnderstandResult["conversationKind"] =
-      ruleKind !== "travel_plan"
-        ? ruleKind
-        : d.conversationKind || ruleKind;
+      ruleKind === "travel_plan"
+        ? "travel_plan"
+        : ruleKind === "profile" || ruleKind === "meta"
+          ? ruleKind
+          : d.conversationKind || ruleKind;
 
     if (conversationKind !== "travel_plan") {
       const brief = input.priorBrief
@@ -169,9 +176,11 @@ Return JSON only.`;
       };
     }
 
+    const locked = extractLockedDestination(input.message);
     const aiBrief: TravelEnquiryBrief = {
       intent: d.intent ?? "leisure_trip",
-      destination: d.destination ?? undefined,
+      destination:
+        locked || d.destination || input.priorBrief?.destination || undefined,
       datesText: d.datesText ?? undefined,
       durationDays: d.durationDays ?? undefined,
       travellers: d.travellers ?? undefined,
@@ -183,6 +192,9 @@ Return JSON only.`;
       preferences: {
         ...(d.preferences ?? {}),
         conversationKind: "travel_plan",
+        ...(wantsTripForm(input.message) || locked
+          ? { awaitingTripForm: true }
+          : {}),
       },
       constraints: d.constraints ?? {},
       temporary: d.temporary ?? {},

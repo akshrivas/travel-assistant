@@ -5,7 +5,6 @@ import { isAiEnabled } from "@/lib/ai/client";
 import { formatPrice, recommendOptions } from "@/lib/engine/recommend";
 import {
   briefReadyForSearch,
-  needsTripForm,
   softFillFromProfile,
 } from "@/lib/engine/trip-form";
 import type {
@@ -116,8 +115,12 @@ export async function runAssistantTurn(input: {
     };
   }
 
-  // Destination locked but trip details incomplete → form (not chat interrogation)
-  if (needsTripForm(brief) && !brief.preferences?.formCompleted) {
+  // Destination locked → always show trip form until user submits it
+  // (soft-filled profile fields must not skip the form)
+  if (
+    (brief.destination || brief.preferences?.vibe) &&
+    !brief.preferences?.formCompleted
+  ) {
     const dest = brief.destination || String(brief.preferences?.vibe || "your trip");
     const reply =
       profile.preferredLanguage === "en"

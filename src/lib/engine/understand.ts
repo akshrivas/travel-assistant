@@ -6,6 +6,93 @@ export type ConversationKind =
   | "profile"
   | "meta";
 
+const DESTINATIONS = [
+  "kashmir",
+  "goa",
+  "kerala",
+  "rajasthan",
+  "manali",
+  "jaipur",
+  "udaipur",
+  "shimla",
+  "andaman",
+  "ladakh",
+  "mumbai",
+  "delhi",
+  "agra",
+  "varanasi",
+  "rishikesh",
+  "ooty",
+  "darjeeling",
+  "gangtok",
+  "pondicherry",
+  "puducherry",
+  "coorg",
+  "munnar",
+  "alleppey",
+  "jaisalmer",
+  "leh",
+] as const;
+
+function capitalize(s: string) {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/** Explicit destination lock from chat — "lock karo manali", "manali lock", "goa final" */
+export function extractLockedDestination(text: string): string | null {
+  const lower = text.toLowerCase().trim();
+
+  // lock / final / decide patterns
+  const lockMatch = lower.match(
+    /(?:lock\s*(?:karo|kar|in|it)?|final|decide|confirm|chalo|jaana\s*hai)\s*[:\-]?\s*([a-z]{3,20})/i,
+  );
+  if (lockMatch?.[1]) {
+    const cand = lockMatch[1].toLowerCase();
+    const hit = DESTINATIONS.find((d) => cand.includes(d) || d.includes(cand));
+    if (hit) return capitalize(hit);
+  }
+
+  // "manali lock karo" / "goa pe lock"
+  for (const d of DESTINATIONS) {
+    if (
+      new RegExp(
+        `\\b${d}\\b.*\\b(lock|final|confirm|chalo|jaana)\\b|\\b(lock|final|confirm)\\b.*\\b${d}\\b`,
+        "i",
+      ).test(lower)
+    ) {
+      return capitalize(d);
+    }
+  }
+
+  // bare destination as the whole message
+  for (const d of DESTINATIONS) {
+    if (new RegExp(`^\\s*${d}\\s*[!.]*\\s*$`, "i").test(lower)) {
+      return capitalize(d);
+    }
+  }
+
+  // "X jaana hai" / "X trip"
+  for (const d of DESTINATIONS) {
+    if (
+      new RegExp(
+        `\\b${d}\\b\\s*(jaana|jaana hai|chalna|trip|holiday|ghumna)|\\b(jaana|trip)\\b.*\\b${d}\\b`,
+        "i",
+      ).test(lower)
+    ) {
+      return capitalize(d);
+    }
+  }
+
+  return null;
+}
+
+export function wantsTripForm(text: string): boolean {
+  const lower = text.toLowerCase();
+  return /(?:form|from)\s*(dikhao|dikha|show|open|bharo|do)|dikhao\s*(?:form|from)|brief\s*(form|dikhao)|trip\s*form|shortlist\s*(laao|do|banao)/i.test(
+    lower,
+  );
+}
+
 /**
  * Detect whether this turn is actually about planning a trip,
  * or general / profile / meta conversation.
@@ -13,7 +100,6 @@ export type ConversationKind =
 export function detectConversationKind(text: string): ConversationKind {
   const lower = text.toLowerCase().trim();
 
-  // Profile / identity
   if (
     /what(?:'s| is)? my name|mera naam|who am i|do you (?:even )?know (?:me|my name)|what do you (?:know|remember) about me|my preferences|mera profile|what.?ve you (?:got|saved)/i.test(
       lower,
@@ -22,7 +108,6 @@ export function detectConversationKind(text: string): ConversationKind {
     return "profile";
   }
 
-  // Meta about the product
   if (
     /what (?:can|do) you do|how do you work|who are you|are you (?:an? )?(?:ai|bot)|kya kar sakte|tum kaun/.test(
       lower,
@@ -31,11 +116,16 @@ export function detectConversationKind(text: string): ConversationKind {
     return "meta";
   }
 
-  // Small talk / gratitude / greetings without trip content
+  // Destination lock / form request = always trip planning
+  if (extractLockedDestination(text) || wantsTripForm(text)) {
+    return "travel_plan";
+  }
+
   const hasTravelSignal =
-    /\b(trip|travel|holiday|vacation|jaana|ghumna|plan|destination|hotel|stay|flight|budget|days?|din|nights?|goa|kashmir|kerala|manali|shimla|rajasthan|ladakh|andaman|beach|samundar|samundar|pahad|honeymoon|family trip|weekend)\b/i.test(
+    /\b(trip|travel|holiday|vacation|jaana|ghumna|plan|destination|hotel|stay|flight|budget|days?|din|nights?|lock|goa|kashmir|kerala|manali|shimla|rajasthan|ladakh|andaman|beach|samundar|pahad|honeymoon|family trip|weekend)\b/i.test(
       lower,
     ) ||
+    DESTINATIONS.some((d) => lower.includes(d)) ||
     /samundar|beach|pahad|ghumna|jaana|trip/i.test(lower) ||
     /\d+\s*k\b/.test(lower);
 
@@ -49,7 +139,6 @@ export function detectConversationKind(text: string): ConversationKind {
   }
 
   if (!hasTravelSignal && lower.length < 80) {
-    // Short non-travel questions → chat (e.g. "what is my name?", "tell me a joke")
     if (
       /^(what|who|why|how|when|where|do you|can you|tell me|are you|kya|kaun|kyun)\b/i.test(
         lower,
@@ -60,8 +149,6 @@ export function detectConversationKind(text: string): ConversationKind {
   }
 
   if (hasTravelSignal) return "travel_plan";
-
-  // Default: if no travel cues, treat as chat — never force a trip funnel
   return "chat";
 }
 
@@ -75,6 +162,7 @@ export function understandTravelEnquiry(
 ): TravelEnquiryBrief {
   const kind = detectConversationKind(text);
   const lower = text.toLowerCase();
+  const locked = extractLockedDestination(text);
 
   if (kind !== "travel_plan") {
     return {
@@ -99,7 +187,7 @@ export function understandTravelEnquiry(
 
   const brief: TravelEnquiryBrief = {
     intent: prior?.intent ?? "leisure_trip",
-    destination: prior?.destination,
+    destination: locked || prior?.destination,
     datesText: prior?.datesText,
     durationDays: prior?.durationDays,
     travellers: prior?.travellers,
@@ -111,6 +199,7 @@ export function understandTravelEnquiry(
     preferences: {
       ...(prior?.preferences ?? {}),
       conversationKind: "travel_plan",
+      ...(wantsTripForm(text) ? { awaitingTripForm: true } : {}),
     },
     constraints: { ...(prior?.constraints ?? {}) },
     temporary: { ...(prior?.temporary ?? {}) },
@@ -134,28 +223,13 @@ export function understandTravelEnquiry(
   else if (/friends|doston/.test(lower)) brief.partyType = "friends";
   else if (/solo|alone|akela/.test(lower)) brief.partyType = "solo";
 
-  // Destination (India beachhead — matching is data-driven via adapters later)
-  const destinations = [
-    "kashmir",
-    "goa",
-    "kerala",
-    "rajasthan",
-    "manali",
-    "jaipur",
-    "udaipur",
-    "shimla",
-    "andaman",
-    "ladakh",
-    "mumbai",
-    "delhi",
-    "agra",
-    "varanasi",
-    "rishikesh",
-  ];
-  for (const d of destinations) {
-    if (lower.includes(d)) {
-      brief.destination = capitalize(d);
-      break;
+  // Destination — prefer explicit lock, else first known place mentioned
+  if (!brief.destination) {
+    for (const d of DESTINATIONS) {
+      if (lower.includes(d)) {
+        brief.destination = capitalize(d);
+        break;
+      }
     }
   }
   // Hindi / common phrases
@@ -260,10 +334,6 @@ export function understandTravelEnquiry(
   brief.confidence = Math.min(1, confidence);
 
   return brief;
-}
-
-function capitalize(s: string) {
-  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 /** Merge new understanding onto prior request brief */
