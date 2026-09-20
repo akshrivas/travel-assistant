@@ -7,6 +7,13 @@ import {
   briefReadyForSearch,
   softFillFromProfile,
 } from "@/lib/engine/trip-form";
+import {
+  matchShortlistOption,
+  optionDisplayName,
+  wantsEnquireConfirm,
+  wantsNewShortlist,
+} from "@/lib/engine/select-option";
+import { extractLockedDestination } from "@/lib/engine/understand";
 import type {
   CustomerProfileView,
   RankedOption,
@@ -23,7 +30,11 @@ export type AssistantTurnResult = {
     | "empty"
     | "out_of_market"
     | "chat"
-    | "trip_form";
+    | "trip_form"
+    | "selected"
+    | "enquire";
+  /** Matched shortlist pick — client may auto-create enquiry */
+  selectedOption?: RankedOption | null;
   profileConfidence: number;
   usedAi: boolean;
   conversationKind?: "travel_plan" | "chat" | "profile" | "meta";
@@ -51,9 +62,12 @@ export async function runAssistantTurn(input: {
   priorBrief?: TravelEnquiryBrief | null;
   profile?: CustomerProfileView | null;
   history?: Array<{ role: "user" | "assistant"; content: string }>;
+  /** Last shortlist — so chat can lock a hotel into enquire/connect */
+  priorShortlist?: RankedOption[] | null;
 }): Promise<AssistantTurnResult> {
   const profile = input.profile ?? emptyProfile();
   const history = input.history || [];
+  const priorShortlist = input.priorShortlist || [];
   const understood = await understandWithAi({
     message: input.message,
     priorBrief: input.priorBrief,
@@ -63,6 +77,91 @@ export async function runAssistantTurn(input: {
   let brief = softFillFromProfile(understood.brief, profile);
   const kind = understood.conversationKind;
   const profileConf = profile.knowledgeConfidence;
+
+  // Hotel / option pick from existing shortlist — before chat or re-search
+  if (priorShortlist.length) {
+    const picked = matchShortlistOption(input.message, priorShortlist);
+    if (picked) {
+      return buildSelectedResult({
+        picked,
+        shortlist: priorShortlist,
+        brief,
+        profile,
+        profileConf,
+        usedAi: understood.usedAi || isAiEnabled(),
+        longTermPreferenceHints: understood.longTermPreferenceHints,
+      });
+    }
+
+    const selectedId = String(brief.preferences?.selectedOptionId || "");
+    if (selectedId && wantsEnquireConfirm(input.message)) {
+      const pickedConfirm =
+        priorShortlist.find((s) => s.option.id === selectedId) ||
+        priorShortlist[0];
+      if (pickedConfirm) {
+        return buildEnquireResult({
+          picked: pickedConfirm,
+          shortlist: priorShortlist,
+          brief,
+          profile,
+          profileConf,
+          usedAi: understood.usedAi || isAiEnabled(),
+        });
+      }
+    }
+
+    // Keep shortlist alive for follow-ups — don't re-search unless asked
+    if (
+      brief.preferences?.formCompleted &&
+      !wantsNewShortlist(input.message)
+    ) {
+      const newDest = extractLockedDestination(input.message);
+      if (
+        newDest &&
+        brief.destination &&
+        newDest.toLowerCase() !== brief.destination.toLowerCase()
+      ) {
+        // New destination lock — reopen trip form
+        brief = {
+          ...brief,
+          destination: newDest,
+          preferences: {
+            ...brief.preferences,
+            formCompleted: false,
+            awaitingTripForm: true,
+            selectedOptionId: undefined,
+            selectedStay: undefined,
+          },
+          missingInformation: ["duration", "budget", "travellers", "vibe"],
+        };
+      } else {
+        const fallback =
+          profile.preferredLanguage === "en"
+            ? "Still looking at your shortlist — name a stay to lock it, or tap Enquire. I connect you for a quotation; I don’t take bookings myself."
+            : "Shortlist pe hi hain — hotel ka naam bolo ya Enquire dabao. Main quotation ke liye connect karta hoon; khud booking nahi leta.";
+        const reply = await craftAssistantReply({
+          stage: "shortlist",
+          conversationKind: "travel_plan",
+          userMessage: input.message,
+          history,
+          brief,
+          profile,
+          shortlist: priorShortlist,
+          fallback,
+        });
+        return {
+          reply,
+          brief,
+          shortlist: priorShortlist,
+          stage: "shortlist",
+          conversationKind: "travel_plan",
+          profileConfidence: profileConf,
+          usedAi: understood.usedAi || isAiEnabled(),
+          longTermPreferenceHints: understood.longTermPreferenceHints,
+        };
+      }
+    }
+  }
 
   if (kind !== "travel_plan") {
     const fallback = buildChatFallback(kind, input.message, profile, history);
@@ -151,6 +250,82 @@ export async function runAssistantTurn(input: {
     usedAi: understood.usedAi || isAiEnabled(),
     longTermPreferenceHints: understood.longTermPreferenceHints,
   });
+}
+
+function buildSelectedResult(input: {
+  picked: RankedOption;
+  shortlist: RankedOption[];
+  brief: TravelEnquiryBrief;
+  profile: CustomerProfileView;
+  profileConf: number;
+  usedAi: boolean;
+  longTermPreferenceHints: AssistantTurnResult["longTermPreferenceHints"];
+}): AssistantTurnResult {
+  const name = optionDisplayName(input.picked);
+  const hi = input.profile.preferredLanguage !== "en";
+  const url = input.picked.option.source?.url;
+  const reply = hi
+    ? `**${name}** lock — enquiry/connect chalu. Provider se quotation aayegi; main inventory/booking nahi leta.${url ? ` Listing: ${url}` : ""} Dates/guests pehle se trip brief mein hain.`
+    : `**${name}** locked — enquiry/connect started. You’ll get a quotation path; I don’t own inventory or take bookings.${url ? ` Listing: ${url}` : ""} Dates/guests are already on your trip brief.`;
+
+  return {
+    reply,
+    brief: {
+      ...input.brief,
+      preferences: {
+        ...input.brief.preferences,
+        conversationKind: "travel_plan",
+        selectedOptionId: input.picked.option.id,
+        selectedStay: name,
+        formCompleted: true,
+        enquireRequested: true,
+      },
+    },
+    shortlist: input.shortlist,
+    selectedOption: input.picked,
+    stage: "selected",
+    conversationKind: "travel_plan",
+    profileConfidence: input.profileConf,
+    usedAi: input.usedAi,
+    longTermPreferenceHints: input.longTermPreferenceHints,
+  };
+}
+
+function buildEnquireResult(input: {
+  picked: RankedOption;
+  shortlist: RankedOption[];
+  brief: TravelEnquiryBrief;
+  profile: CustomerProfileView;
+  profileConf: number;
+  usedAi: boolean;
+}): AssistantTurnResult {
+  const name = optionDisplayName(input.picked);
+  const hi = input.profile.preferredLanguage !== "en";
+  const reply = hi
+    ? `**${name}** pe enquiry chalu. Provider se quotation connect ho jayegi — status yahin dikhega. Confirm listing pe bhi check kar lena.`
+    : `Enquiry started for **${name}**. I’ll connect for a quotation — status shows here. Always re-check the listing before you commit.`;
+
+  return {
+    reply,
+    brief: {
+      ...input.brief,
+      preferences: {
+        ...input.brief.preferences,
+        conversationKind: "travel_plan",
+        selectedOptionId: input.picked.option.id,
+        selectedStay: name,
+        formCompleted: true,
+        enquireRequested: true,
+      },
+    },
+    shortlist: input.shortlist,
+    selectedOption: input.picked,
+    stage: "enquire",
+    conversationKind: "travel_plan",
+    profileConfidence: input.profileConf,
+    usedAi: input.usedAi,
+    longTermPreferenceHints: null,
+  };
 }
 
 /** After trip form submit — search existing market with complete brief */

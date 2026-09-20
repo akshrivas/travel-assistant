@@ -329,6 +329,10 @@ export function AssistantChat({
     setEnquireMsg(null);
 
     const history = historyForModel(nextMessages);
+    const priorShortlist =
+      [...nextMessages]
+        .reverse()
+        .find((m) => m.shortlist && m.shortlist.length > 0)?.shortlist || [];
 
     startTransition(async () => {
       try {
@@ -340,6 +344,7 @@ export function AssistantChat({
             conversationId,
             priorBrief,
             history,
+            priorShortlist,
           }),
         });
         const data = await res.json();
@@ -361,9 +366,14 @@ export function AssistantChat({
         if (data.stage === "trip_form" && data.brief) {
           setFormBrief(data.brief as TravelEnquiryBrief);
           setTripFormOpen(true);
-        } else if (data.stage === "shortlist") {
+        } else if (
+          data.stage === "shortlist" ||
+          data.stage === "selected" ||
+          data.stage === "enquire"
+        ) {
           setTripFormOpen(false);
         }
+        if (data.enquiryMessage) setEnquireMsg(data.enquiryMessage);
         setMessages((m) => [
           ...m,
           {
@@ -596,15 +606,26 @@ export function AssistantChat({
                 ) : null}
                 {msg.shortlist && msg.shortlist.length > 0 && (
                   <div className="mt-4 space-y-3">
-                    {msg.shortlist.map((item) => (
+                    {msg.shortlist.map((item) => {
+                      const selectedId = String(
+                        msg.brief?.preferences?.selectedOptionId || "",
+                      );
+                      const isSelected =
+                        Boolean(selectedId) && item.option.id === selectedId;
+                      return (
                       <div
                         key={item.option.id}
-                        className="border border-[var(--line)] bg-[var(--bg)]/80 px-3 py-3"
+                        className={
+                          isSelected
+                            ? "border border-[var(--accent)] bg-[var(--accent-soft)]/40 px-3 py-3"
+                            : "border border-[var(--line)] bg-[var(--bg)]/80 px-3 py-3"
+                        }
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
                             <p className="text-xs uppercase tracking-wider text-[var(--accent)]">
                               {item.label}
+                              {isSelected ? " · Locked" : ""}
                             </p>
                             <p className="font-[family-name:var(--font-display)] text-lg">
                               {item.option.destination} ·{" "}
@@ -638,12 +659,13 @@ export function AssistantChat({
                               onClick={() => enquire(item)}
                               className="mt-2 text-sm underline underline-offset-4 hover:text-[var(--accent)]"
                             >
-                              Enquire
+                              {isSelected ? "Enquired" : "Enquire"}
                             </button>
                           </div>
                         </div>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>

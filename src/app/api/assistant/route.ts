@@ -9,7 +9,7 @@ import {
   ensureDbUser,
   safePersist,
 } from "@/lib/db/ensure";
-import type { TravelEnquiryBrief } from "@/lib/types/travel";
+import type { RankedOption, TravelEnquiryBrief } from "@/lib/types/travel";
 
 /** Live web search can exceed default serverless limits */
 export const maxDuration = 60;
@@ -51,6 +51,8 @@ const bodySchema = z.object({
     )
     .max(24)
     .optional(),
+  /** Last shortlist from client memory — for hotel lock → enquire */
+  priorShortlist: z.array(z.unknown()).max(8).optional(),
 });
 
 function briefFromRequest(priorReq: {
@@ -184,11 +186,47 @@ export async function POST(req: Request) {
       (priorReq ? briefFromRequest(priorReq) : null) ||
       briefFromClient(parsed.data.priorBrief);
 
+    let priorShortlist: RankedOption[] = [];
+    const clientList = parsed.data.priorShortlist;
+    if (Array.isArray(clientList) && clientList.length) {
+      priorShortlist = clientList as RankedOption[];
+    } else if (priorReq?.id) {
+      const rec = await safePersist("load-recommendation", () =>
+        prisma.recommendation.findFirst({
+          where: { travelRequestId: priorReq.id },
+          orderBy: { createdAt: "desc" },
+        }),
+      );
+      if (rec) {
+        try {
+          const options = JSON.parse(rec.optionsJson) as RankedOption["option"][];
+          const reasons = JSON.parse(rec.reasonsJson) as Array<{
+            id: string;
+            score: number;
+            reason: string;
+            label?: string;
+          }>;
+          priorShortlist = options.map((option) => {
+            const meta = reasons.find((r) => r.id === option.id);
+            return {
+              option,
+              score: meta?.score ?? 0,
+              reason: meta?.reason ?? "",
+              label: meta?.label,
+            };
+          });
+        } catch {
+          priorShortlist = [];
+        }
+      }
+    }
+
     const result = await runAssistantTurn({
       message: parsed.data.message,
       priorBrief,
       profile,
       history: parsed.data.history,
+      priorShortlist,
     });
 
     const requestData = {
@@ -208,7 +246,12 @@ export async function POST(req: Request) {
       confidence: result.brief.confidence,
       missingJson: JSON.stringify(result.brief.missingInformation ?? []),
       rawBrief: result.brief.rawText,
-      status: result.stage === "shortlist" ? "shortlisted" : "open",
+      status:
+        result.stage === "enquire" || result.stage === "selected"
+          ? "enquired"
+          : result.stage === "shortlist"
+            ? "shortlisted"
+            : "open",
     };
 
     let travelRequestId: string | undefined = priorReq?.id;
@@ -237,6 +280,45 @@ export async function POST(req: Request) {
     });
 
     if (request) travelRequestId = request.id;
+
+    let enquiryMessage: string | null = null;
+    if (
+      request &&
+      result.selectedOption &&
+      (result.stage === "selected" || result.stage === "enquire")
+    ) {
+      const enquiry = await safePersist("enquiry", () =>
+        prisma.enquiry.create({
+          data: {
+            travelRequestId: request.id,
+            optionId: result.selectedOption!.option.id,
+            optionSnapshot: JSON.stringify(result.selectedOption!.option),
+            status: "pending",
+            providerRef: String(
+              result.selectedOption!.option.source?.name ?? "unknown",
+            ),
+          },
+        }),
+      );
+      if (enquiry) {
+        enquiryMessage =
+          result.stage === "enquire"
+            ? result.reply
+            : `Enquiry created for ${result.selectedOption.option.stay?.name || result.selectedOption.option.destination}. We’ll connect this to the provider for a quotation — subject to confirmation.`;
+        await safePersist("signal-enquire", () =>
+          prisma.behaviourSignal.create({
+            data: {
+              userId: dbUser.id,
+              type: "save",
+              payloadJson: JSON.stringify({
+                optionId: result.selectedOption!.option.id,
+                enquiryId: enquiry.id,
+              }),
+            },
+          }),
+        );
+      }
+    }
 
     if (result.shortlist.length && request) {
       await safePersist("recommendation", () =>
@@ -330,6 +412,7 @@ export async function POST(req: Request) {
       travelRequestId: travelRequestId || null,
       userId: dbUser.id,
       aiEnabled: result.usedAi,
+      enquiryMessage,
       ...result,
     });
   } catch (err) {
