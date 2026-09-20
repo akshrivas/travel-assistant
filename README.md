@@ -1,41 +1,51 @@
-# Sahayatri — Personal Travel Assistant (V1)
+# Travel Assistant (V1 / M1)
 
-**Status:** V1.0 locked spine — M1 in progress
+Personal Travel Assistant — India beachhead.  
+Spine: Understand → Stitch market → Shortlist → Enquire → Learn
 
-> We are not building a travel marketplace or OTA.  
-> We are building a **Personal Travel Assistant** that sits on top of the existing travel market — for the customer’s benefit.
-
-## Spine
-
-Understand customer → Understand trip → Stitch existing market → Personalize → Shortlist → Connect → Learn
-
-## Abstractions entities
-
-`Conversation ≠ Travel Request ≠ Recommendation ≠ Trip`  
-`Source Adapter → Normalized Travel Option`
-
-## Beachhead
-
-- Market focus: **India** (`MARKET_FOCUS=IN`)
-- Nothing hard-coded in the UI as supply — options come from **source adapters**
-- First adapter: `india-market-catalog` reading `data/sources/india-market-catalog.json` (replace with live API adapters later)
-
-## Run locally
+## Local setup (recommended)
 
 ```bash
+# 1) Enter project
+cd travel-assistant
+
+# 2) Install
 npm install
+
+# 3) Database
 npx prisma migrate dev
+
+# 4) Run
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000)
+Open http://localhost:3000
 
-## M1 demo prompts
+### Demo prompts
+- December mein family ke saath 6 din Kashmir jaana hai, budget 60k
+- Goa for 5 days, couple, around 50k, something peaceful
+- Kerala relaxed trip, 6 days, family, under 70k
 
-- `December mein family ke saath 6 din Kashmir jaana hai, budget 60k`
-- `Goa for 5 days, couple, around 50k, something peaceful`
-- `Kerala relaxed trip, 6 days, family, under 70k`
+## Push to GitHub (from your laptop)
+
+```bash
+git init   # only if needed
+git remote add origin git@github.com:YOUR_USER/YOUR_REPO.git
+git checkout -b cursor/travel-assistant-m1-d5ad
+git push -u origin cursor/travel-assistant-m1-d5ad
+```
+
+Or create repo in GitHub UI, then push this folder.
+
+## Deploy to Vercel (from your laptop)
+
+```bash
+npm i -g vercel
+vercel login
+vercel
+```
+
+> Note: SQLite (`file:./dev.db`) is fine locally. For Vercel production, connect Postgres/Turso later — serverless can’t reliably write a local SQLite file.
 
 ## Stack
-
-Next.js · TypeScript · Tailwind · Prisma · SQLite (swap to Postgres later via `DATABASE_URL`)
+Next.js · TypeScript · Tailwind · Prisma · SQLite
