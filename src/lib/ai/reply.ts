@@ -1,5 +1,13 @@
 import { defaultModel, getOpenAI, isAiEnabled } from "@/lib/ai/client";
 import { formatPrice } from "@/lib/engine/recommend";
+import {
+  detectMood,
+  languageInstruction,
+  moodInstruction,
+  resolveReplyLanguage,
+  type ReplyLanguage,
+  type ReplyMood,
+} from "@/lib/ai/tone";
 import type {
   CustomerProfileView,
   RankedOption,
@@ -19,32 +27,48 @@ export async function craftAssistantReply(input: {
   fallback: string;
 }): Promise<string> {
   const openai = getOpenAI();
-  if (!isAiEnabled() || !openai) return input.fallback;
+  const msg = input.userMessage || "";
+  const lang = resolveReplyLanguage(msg, input.profile.preferredLanguage);
+  const mood = detectMood(msg);
+
+  if (!isAiEnabled() || !openai) {
+    return localizeFallback(input.fallback, lang);
+  }
 
   try {
     const system = `You are TripSaathi — a sharp personal travel companion for India.
-Tone: natural chat with a smart friend continuing an ongoing conversation. Not a call-center script.
+Tone: natural chat with a smart friend continuing an ongoing conversation.
+
+Language (mandatory):
+${languageInstruction(lang)}
+
+Mood (mandatory):
+${moodInstruction(mood)}
 
 Core behaviour:
-- You HAVE conversation history. Use it. Refer to what they already said (name, beach wish, destination, budget…) when relevant.
+- You HAVE conversation history. Use it. Refer to what they already said when relevant.
 - Never pretend this is a brand-new chat if history exists.
 - Answer the user's ACTUAL latest message in context of prior turns.
+- Match their language AND mood — if they write Hinglish casually, reply the same way.
 - Do not force trip planning. If they chat, chat back.
 - If they ask name/prefs/what you remember — use customer profile + history.
 - Only ask trip-clarifying questions when stage is clarify AND they are clearly planning a trip.
 - Never invent hotels/prices/operators — only use provided shortlist data.
 - Do NOT open with "Hi {name}" every turn.
-- English. Light **bold** ok. No emojis. Chat replies under ~70 words unless shortlist.`;
+- Light **bold** ok. Emojis only if the user used them. Chat replies under ~70 words unless shortlist.`;
 
     const payload = {
       stage: input.stage,
       conversationKind: input.conversationKind || "travel_plan",
+      replyLanguage: lang,
+      replyMood: mood,
       userMessage: input.userMessage,
       recentHistory: (input.history || []).slice(-12),
       customer: {
         displayName: input.profile.displayName || null,
         home: input.profile.homeLocation,
         partyType: input.profile.partyType,
+        preferredLanguage: input.profile.preferredLanguage,
         usualBudget: [input.profile.budgetMin, input.profile.budgetMax],
         preferredDestinations: input.profile.preferredDestinations,
         preferences: input.profile.preferences,
@@ -77,28 +101,34 @@ Core behaviour:
 
     const completion = await openai.chat.completions.create({
       model: defaultModel(),
-      temperature: input.stage === "chat" ? 0.55 : 0.4,
-      max_tokens: input.stage === "chat" ? 180 : 280,
+      temperature: input.stage === "chat" ? 0.6 : 0.45,
+      max_tokens: input.stage === "chat" ? 200 : 300,
       messages: [
         { role: "system", content: system },
         ...historyMsgs,
         {
           role: "user",
-          content: `Latest user message to answer (use history above; do not ignore it):\n${input.userMessage || ""}\n\nContext JSON:\n${JSON.stringify(payload)}`,
+          content: `Latest user message to answer (match language=${lang}, mood=${mood}):\n${msg}\n\nContext JSON:\n${JSON.stringify(payload)}`,
         },
       ],
     });
 
     const text = completion.choices[0]?.message?.content?.trim();
-    if (!text) return input.fallback;
+    if (!text) return localizeFallback(input.fallback, lang);
     if (input.stage === "chat" && input.conversationKind === "profile") {
       return text;
     }
     return stripNameSpam(text, input.profile.displayName);
   } catch (err) {
     console.error("AI reply failed", err);
-    return input.fallback;
+    return localizeFallback(input.fallback, lang);
   }
+}
+
+function localizeFallback(text: string, lang: ReplyLanguage): string {
+  if (lang === "en") return text;
+  // Keep English fallback if we can't translate offline — AI path is primary
+  return text;
 }
 
 function stripNameSpam(text: string, displayName?: string | null): string {
@@ -111,3 +141,5 @@ function stripNameSpam(text: string, displayName?: string | null): string {
     .replace(new RegExp(`^${escaped}[,!.\\-–—]\\s*`, "i"), "")
     .trim();
 }
+
+export type { ReplyLanguage, ReplyMood };

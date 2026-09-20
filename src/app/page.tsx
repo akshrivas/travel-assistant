@@ -35,6 +35,7 @@ export default async function Home() {
       partyType={profile.partyType}
       homeLocation={profile.homeLocation}
       preferredDestinations={profile.preferredDestinations}
+      preferredLanguage={profile.preferredLanguage || "hinglish"}
     />
   );
 }

@@ -62,29 +62,70 @@ function buildWelcome(input: {
   partyType?: string | null;
   homeLocation?: string | null;
   preferredDestinations?: string[];
+  preferredLanguage?: string | null;
 }): { greeting: string; body: string } {
   const name = firstName(input.userName);
-  const greet = `${timeGreeting()}, ${name}.`;
+  const lang = input.preferredLanguage || "hinglish";
+
+  const greet =
+    lang === "hi"
+      ? `${timeGreetingHi()}, ${name}.`
+      : lang === "en"
+        ? `${timeGreeting()}, ${name}.`
+        : `${timeGreetingHinglish()}, ${name}.`;
 
   if (input.knowledgeConfidence >= 0.45) {
     const bits: string[] = [];
     if (input.partyType) bits.push(`${input.partyType} trips`);
     if (input.preferredDestinations?.[0]) {
-      bits.push(`${input.preferredDestinations[0]} on your radar`);
+      bits.push(
+        lang === "en"
+          ? `${input.preferredDestinations[0]} on your radar`
+          : `${input.preferredDestinations[0]} pe nazar`,
+      );
+    }
+    if (lang === "en") {
+      const known = bits.length
+        ? `I already know you lean ${bits.join(" · ")}.`
+        : "I already know a bit about how you like to travel.";
+      return {
+        greeting: greet,
+        body: `${known} Tell me the next India trip — I’ll search live listings and shortlist the strongest fits.`,
+      };
     }
     const known = bits.length
-      ? `I already know you lean ${bits.join(" · ")}.`
-      : "I already know a bit about how you like to travel.";
+      ? `Main jaanta hoon — ${bits.join(" · ")}.`
+      : "Thoda pehle se jaanta hoon aapki travel vibe.";
     return {
       greeting: greet,
-      body: `${known} Tell me the next India trip — I’ll search live listings and shortlist the strongest fits.`,
+      body: `${known} Agla India trip batao — live listings search karke best fits shortlist karunga.`,
     };
   }
 
+  if (lang === "en") {
+    return {
+      greeting: greet,
+      body: "Where in India are you headed, roughly how many days, and what’s the budget? I’ll search live market listings and bring back the best-reviewed options.",
+    };
+  }
   return {
     greeting: greet,
-    body: "Where in India are you headed, roughly how many days, and what’s the budget? I’ll search live market listings and bring back the best-reviewed options.",
+    body: "India mein kahan jaana hai, roughly kitne din, aur budget? Live market se best-reviewed options nikaal ke laata hoon.",
   };
+}
+
+function timeGreetingHinglish(): string {
+  const h = new Date().getHours();
+  if (h < 12) return "Good morning";
+  if (h < 17) return "Good afternoon";
+  return "Good evening";
+}
+
+function timeGreetingHi(): string {
+  const h = new Date().getHours();
+  if (h < 12) return "सुप्रभात";
+  if (h < 17) return "नमस्ते";
+  return "शुभ संध्या";
 }
 
 function lastTopicHint(messages: ChatMessage[]): string | null {
@@ -135,6 +176,7 @@ export function AssistantChat({
   partyType = null,
   homeLocation = null,
   preferredDestinations = [],
+  preferredLanguage = "hinglish",
 }: {
   userName?: string;
   userEmail?: string;
@@ -142,6 +184,7 @@ export function AssistantChat({
   partyType?: string | null;
   homeLocation?: string | null;
   preferredDestinations?: string[];
+  preferredLanguage?: string | null;
 }) {
   const welcome = useMemo(
     () =>
@@ -151,6 +194,7 @@ export function AssistantChat({
         partyType,
         homeLocation,
         preferredDestinations,
+        preferredLanguage,
       }),
     [
       userName,
@@ -158,6 +202,7 @@ export function AssistantChat({
       partyType,
       homeLocation,
       preferredDestinations,
+      preferredLanguage,
     ],
   );
 

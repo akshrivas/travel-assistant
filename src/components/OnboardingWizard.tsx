@@ -19,6 +19,18 @@ const PARTY = [
 
 const PACE = ["relaxed", "balanced", "adventure"] as const;
 const INTERESTS = ["nature", "food", "culture", "beach", "adventure"] as const;
+const HOTEL = [
+  { id: "homestay", label: "Homestay" },
+  { id: "boutique", label: "Boutique" },
+  { id: "resort", label: "Resort" },
+  { id: "budget", label: "Budget stay" },
+  { id: "luxury", label: "Luxury" },
+] as const;
+const LANGS = [
+  { id: "hinglish", label: "Hinglish" },
+  { id: "en", label: "English" },
+  { id: "hi", label: "हिंदी" },
+] as const;
 
 const fieldClass =
   "mt-1 w-full border border-[var(--line)] bg-[var(--surface)] px-3 py-3 outline-none focus:border-[var(--accent)]";
@@ -36,7 +48,7 @@ export function OnboardingWizard() {
 
   const [displayName, setDisplayName] = useState("");
   const [homeLocation, setHomeLocation] = useState("");
-  const [preferredLanguage, setPreferredLanguage] = useState("en");
+  const [preferredLanguage, setPreferredLanguage] = useState("hinglish");
 
   const [partyType, setPartyType] = useState<string | null>(null);
   const [typicalDuration, setTypicalDuration] = useState("");
@@ -45,9 +57,10 @@ export function OnboardingWizard() {
 
   const [pace, setPace] = useState<string | null>(null);
   const [interests, setInterests] = useState<string[]>([]);
+  const [hotel, setHotel] = useState<string | null>(null);
   const [avoidPacked, setAvoidPacked] = useState(false);
+  const [vegPrefer, setVegPrefer] = useState(false);
 
-  // If this device already finished onboarding, restore session and skip wizard
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -63,7 +76,7 @@ export function OnboardingWizard() {
           body: JSON.stringify({
             displayName: backup.profile.displayName || undefined,
             homeLocation: backup.profile.homeLocation || undefined,
-            preferredLanguage: backup.profile.preferredLanguage || "en",
+            preferredLanguage: backup.profile.preferredLanguage || "hinglish",
             partyType: backup.profile.partyType ?? null,
             typicalDuration: backup.profile.typicalDuration ?? null,
             budgetMin: backup.profile.budgetMin ?? null,
@@ -85,7 +98,7 @@ export function OnboardingWizard() {
           return;
         }
       } catch {
-        /* fall through to wizard */
+        /* fall through */
       }
       if (!cancelled) setRestoring(false);
     })();
@@ -109,6 +122,8 @@ export function OnboardingWizard() {
     const preferences: Record<string, unknown> = {};
     if (pace) preferences.pace = pace;
     if (interests.length) preferences.interests = interests;
+    if (hotel) preferences.hotel = hotel;
+    if (vegPrefer) preferences.food = "veg-friendly";
     const avoidances: Record<string, unknown> = {};
     if (avoidPacked) avoidances.packedItinerary = true;
 
@@ -163,10 +178,15 @@ export function OnboardingWizard() {
   function submitStep1(e: React.FormEvent) {
     e.preventDefault();
     if (!displayName.trim()) {
-      setError("What should we call you?");
+      setError(
+        preferredLanguage === "hi"
+          ? "Naam toh batao?"
+          : preferredLanguage === "en"
+            ? "What should we call you?"
+            : "Naam toh bata do yaar",
+      );
       return;
     }
-    // Persist full snapshot each step (serverless-safe)
     save(false, 2);
   }
 
@@ -178,12 +198,41 @@ export function OnboardingWizard() {
     save(false, 3);
   }
 
-  function submitStep3(skip: boolean) {
+  function submitStep3() {
     save(true, "done");
-    if (skip) {
-      // still marks complete with whatever we have
-    }
   }
+
+  const copy = {
+    stepLabel: "Step",
+    of: "of",
+    minute: "~1 minute",
+    h1:
+      step === 1
+        ? preferredLanguage === "hi"
+          ? "Pehle aapko jaanein"
+          : preferredLanguage === "en"
+            ? "Let’s know you"
+            : "Pehle thoda jaan lein"
+        : step === 2
+          ? preferredLanguage === "hi"
+            ? "Aap kaise ghumte ho"
+            : preferredLanguage === "en"
+              ? "How you usually travel"
+              : "Usually kaise ghumte ho"
+          : preferredLanguage === "hi"
+            ? "Kya pasand hai"
+            : preferredLanguage === "en"
+              ? "What you enjoy"
+              : "Kya vibe pasand hai",
+    sub:
+      step === 1
+        ? preferredLanguage === "en"
+          ? "Basics only — so replies feel personal."
+          : "Bas basics — taaki baat personal lage."
+        : preferredLanguage === "en"
+          ? "Optional. Skip anytime — we’ll learn as we go."
+          : "Optional hai. Skip kar sakte ho — baad mein seekh lenge.",
+  };
 
   if (restoring) {
     return (
@@ -192,7 +241,9 @@ export function OnboardingWizard() {
           {APP_NAME}
         </p>
         <p className="mt-3 text-sm text-[var(--muted)]">
-          Restoring your profile…
+          {preferredLanguage === "en"
+            ? "Restoring your profile…"
+            : "Profile wapas laa rahe hain…"}
         </p>
       </div>
     );
@@ -204,34 +255,36 @@ export function OnboardingWizard() {
         {APP_NAME}
       </p>
       <p className="mt-1 text-xs uppercase tracking-wider text-[var(--accent)]">
-        Step {step} of 3 · ~1 minute
+        {copy.stepLabel} {step} {copy.of} 3 · {copy.minute}
       </p>
       <h1 className="mt-2 font-[family-name:var(--font-display)] text-3xl text-[var(--ink)]">
-        {step === 1 && "Let’s know you"}
-        {step === 2 && "How you usually travel"}
-        {step === 3 && "What you enjoy"}
+        {copy.h1}
       </h1>
-      <p className="mt-2 text-[var(--muted)]">
-        {step === 1 && "Basics only — so replies feel personal."}
-        {step === 2 && "Optional. Skip anytime — we’ll learn as we go."}
-        {step === 3 && "Optional preferences. You can change these later."}
-      </p>
+      <p className="mt-2 text-[var(--muted)]">{copy.sub}</p>
 
       {step === 1 && (
         <form onSubmit={submitStep1} className="mt-8 space-y-4">
           <label className="block text-sm">
-            <span className="text-[var(--muted)]">What should I call you?</span>
+            <span className="text-[var(--muted)]">
+              {preferredLanguage === "en"
+                ? "What should I call you?"
+                : "Kya bulau aapko?"}
+            </span>
             <input
               required
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
               className={fieldClass}
-              placeholder="Your name"
+              placeholder={preferredLanguage === "en" ? "Your name" : "Naam"}
               autoFocus
             />
           </label>
           <label className="block text-sm">
-            <span className="text-[var(--muted)]">Home base (city / country)</span>
+            <span className="text-[var(--muted)]">
+              {preferredLanguage === "en"
+                ? "Home base (city / country)"
+                : "Ghar kahan? (city / country)"}
+            </span>
             <input
               value={homeLocation}
               onChange={(e) => setHomeLocation(e.target.value)}
@@ -239,20 +292,38 @@ export function OnboardingWizard() {
               placeholder="e.g. Delhi, India"
             />
           </label>
-          <label className="block text-sm">
-            <span className="text-[var(--muted)]">Preferred language</span>
-            <select
-              value={preferredLanguage}
-              onChange={(e) => setPreferredLanguage(e.target.value)}
-              className={fieldClass}
-            >
-              <option value="en">English</option>
-              <option value="hi">Hindi</option>
-            </select>
-          </label>
+          <div>
+            <p className="mb-2 text-sm text-[var(--muted)]">
+              {preferredLanguage === "en"
+                ? "Chat language"
+                : "Baat kis language mein?"}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {LANGS.map((l) => (
+                <Chip
+                  key={l.id}
+                  active={preferredLanguage === l.id}
+                  onClick={() => setPreferredLanguage(l.id)}
+                >
+                  {l.label}
+                </Chip>
+              ))}
+            </div>
+            <p className="mt-2 text-xs text-[var(--muted)]">
+              {preferredLanguage === "en"
+                ? "I’ll still match whatever language you type in chat."
+                : "Chat mein jo language likhoge, usi mein reply milega."}
+            </p>
+          </div>
           {error && <p className="text-sm text-red-700">{error}</p>}
           <button type="submit" disabled={pending} className={btnClass}>
-            {pending ? "Saving…" : "Continue"}
+            {pending
+              ? preferredLanguage === "en"
+                ? "Saving…"
+                : "Save ho raha…"
+              : preferredLanguage === "en"
+                ? "Continue"
+                : "Aage badho"}
           </button>
         </form>
       )}
@@ -260,7 +331,11 @@ export function OnboardingWizard() {
       {step === 2 && (
         <div className="mt-8 space-y-5">
           <div>
-            <p className="mb-2 text-sm text-[var(--muted)]">Usually travel as</p>
+            <p className="mb-2 text-sm text-[var(--muted)]">
+              {preferredLanguage === "en"
+                ? "Usually travel as"
+                : "Usually kaise ghumte ho"}
+            </p>
             <div className="flex flex-wrap gap-2">
               {PARTY.map((p) => (
                 <Chip
@@ -274,7 +349,11 @@ export function OnboardingWizard() {
             </div>
           </div>
           <label className="block text-sm">
-            <span className="text-[var(--muted)]">Typical trip length (days)</span>
+            <span className="text-[var(--muted)]">
+              {preferredLanguage === "en"
+                ? "Typical trip length (days)"
+                : "Usually kitne din ka trip?"}
+            </span>
             <input
               inputMode="numeric"
               value={typicalDuration}
@@ -285,7 +364,9 @@ export function OnboardingWizard() {
           </label>
           <label className="block text-sm">
             <span className="text-[var(--muted)]">
-              Usual budget (₹ thousands, e.g. 60 = ₹60k)
+              {preferredLanguage === "en"
+                ? "Usual budget (₹ thousands, e.g. 60 = ₹60k)"
+                : "Usual budget (₹ thousands — 60 = ₹60k)"}
             </span>
             <input
               inputMode="numeric"
@@ -296,7 +377,11 @@ export function OnboardingWizard() {
             />
           </label>
           <label className="block text-sm">
-            <span className="text-[var(--muted)]">Places you like (comma-separated)</span>
+            <span className="text-[var(--muted)]">
+              {preferredLanguage === "en"
+                ? "Places you like (comma-separated)"
+                : "Pasand ke places (comma se alag)"}
+            </span>
             <input
               value={destinations}
               onChange={(e) => setDestinations(e.target.value)}
@@ -312,7 +397,11 @@ export function OnboardingWizard() {
               onClick={() => submitStep2(false)}
               className={`${btnClass} flex-1`}
             >
-              {pending ? "Saving…" : "Continue"}
+              {pending
+                ? "…"
+                : preferredLanguage === "en"
+                  ? "Continue"
+                  : "Aage badho"}
             </button>
             <button
               type="button"
@@ -339,6 +428,22 @@ export function OnboardingWizard() {
             </div>
           </div>
           <div>
+            <p className="mb-2 text-sm text-[var(--muted)]">
+              {preferredLanguage === "en" ? "Stay style" : "Stay ka style"}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {HOTEL.map((h) => (
+                <Chip
+                  key={h.id}
+                  active={hotel === h.id}
+                  onClick={() => setHotel(h.id)}
+                >
+                  {h.label}
+                </Chip>
+              ))}
+            </div>
+          </div>
+          <div>
             <p className="mb-2 text-sm text-[var(--muted)]">Interests</p>
             <div className="flex flex-wrap gap-2">
               {INTERESTS.map((i) => (
@@ -358,22 +463,38 @@ export function OnboardingWizard() {
               checked={avoidPacked}
               onChange={(e) => setAvoidPacked(e.target.checked)}
             />
-            Avoid very packed itineraries
+            {preferredLanguage === "en"
+              ? "Avoid very packed itineraries"
+              : "Bahut packed itinerary mat dena"}
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={vegPrefer}
+              onChange={(e) => setVegPrefer(e.target.checked)}
+            />
+            {preferredLanguage === "en"
+              ? "Prefer veg-friendly food options"
+              : "Veg-friendly food prefer hai"}
           </label>
           {error && <p className="text-sm text-red-700">{error}</p>}
           <div className="flex gap-3">
             <button
               type="button"
               disabled={pending}
-              onClick={() => submitStep3(false)}
+              onClick={() => submitStep3()}
               className={`${btnClass} flex-1`}
             >
-              {pending ? "Saving…" : "Finish — plan a trip"}
+              {pending
+                ? "…"
+                : preferredLanguage === "en"
+                  ? "Finish — plan a trip"
+                  : "Ho gaya — trip plan karo"}
             </button>
             <button
               type="button"
               disabled={pending}
-              onClick={() => submitStep3(true)}
+              onClick={() => submitStep3()}
               className={ghostClass}
             >
               Skip

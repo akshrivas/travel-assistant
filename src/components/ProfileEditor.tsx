@@ -8,6 +8,13 @@ import type { CustomerProfileView } from "@/lib/types/travel";
 const PARTY = ["solo", "couple", "family", "friends"] as const;
 const PACE = ["relaxed", "balanced", "adventure"] as const;
 const INTERESTS = ["nature", "food", "culture", "beach", "adventure"] as const;
+const HOTEL = [
+  { id: "homestay", label: "Homestay" },
+  { id: "boutique", label: "Boutique" },
+  { id: "resort", label: "Resort" },
+  { id: "budget", label: "Budget stay" },
+  { id: "luxury", label: "Luxury" },
+] as const;
 
 const field =
   "mt-1 w-full border border-[var(--line)] bg-[var(--surface)] px-3 py-2.5 outline-none focus:border-[var(--accent)]";
@@ -29,7 +36,9 @@ export function ProfileEditor() {
   const [destinations, setDestinations] = useState("");
   const [pace, setPace] = useState<string | null>(null);
   const [interests, setInterests] = useState<string[]>([]);
+  const [hotel, setHotel] = useState<string | null>(null);
   const [avoidPacked, setAvoidPacked] = useState(false);
+  const [vegPrefer, setVegPrefer] = useState(false);
   const [confidence, setConfidence] = useState(0);
 
   useEffect(() => {
@@ -51,9 +60,11 @@ export function ProfileEditor() {
         setDestinations((p.preferredDestinations || []).join(", "));
         const prefs = p.preferences || {};
         setPace(typeof prefs.pace === "string" ? prefs.pace : null);
+        setHotel(typeof prefs.hotel === "string" ? prefs.hotel : null);
         setInterests(
           Array.isArray(prefs.interests) ? (prefs.interests as string[]) : [],
         );
+        setVegPrefer(prefs.food === "veg-friendly");
         setAvoidPacked(Boolean(p.avoidances?.packedItinerary));
         setConfidence(p.knowledgeConfidence || 0);
       })
@@ -94,7 +105,9 @@ export function ProfileEditor() {
           preferredDestinations: destList,
           preferences: {
             pace: pace || null,
+            hotel: hotel || null,
             interests,
+            food: vegPrefer ? "veg-friendly" : null,
           },
           avoidances: avoidPacked
             ? { packedItinerary: true }
@@ -160,14 +173,15 @@ export function ProfileEditor() {
           />
         </label>
         <label className="block text-sm">
-          <span className="text-[var(--muted)]">Language</span>
+          <span className="text-[var(--muted)]">Chat language</span>
           <select
             className={field}
             value={preferredLanguage}
             onChange={(e) => setPreferredLanguage(e.target.value)}
           >
+            <option value="hinglish">Hinglish</option>
             <option value="en">English</option>
-            <option value="hi">Hindi</option>
+            <option value="hi">हिंदी</option>
           </select>
         </label>
 
@@ -241,6 +255,26 @@ export function ProfileEditor() {
         </div>
 
         <div>
+          <p className="mb-2 text-sm text-[var(--muted)]">Stay style</p>
+          <div className="flex flex-wrap gap-2">
+            {HOTEL.map((h) => (
+              <button
+                key={h.id}
+                type="button"
+                onClick={() => setHotel(h.id)}
+                className={
+                  hotel === h.id
+                    ? "border border-[var(--accent)] bg-[var(--accent-soft)] px-3 py-1.5 text-sm"
+                    : "border border-[var(--line)] px-3 py-1.5 text-sm text-[var(--muted)]"
+                }
+              >
+                {h.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div>
           <p className="mb-2 text-sm text-[var(--muted)]">Interests</p>
           <div className="flex flex-wrap gap-2">
             {INTERESTS.map((i) => (
@@ -267,6 +301,14 @@ export function ProfileEditor() {
             onChange={(e) => setAvoidPacked(e.target.checked)}
           />
           Avoid very packed itineraries
+        </label>
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={vegPrefer}
+            onChange={(e) => setVegPrefer(e.target.checked)}
+          />
+          Prefer veg-friendly food options
         </label>
 
         {error && <p className="text-sm text-red-700">{error}</p>}
