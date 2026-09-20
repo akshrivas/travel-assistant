@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { APP_NAME, APP_TAGLINE } from "@/lib/brand";
 
 export function LoginForm() {
   const router = useRouter();
@@ -43,9 +44,12 @@ export function LoginForm() {
   return (
     <div className="mx-auto flex min-h-[100dvh] max-w-md flex-col justify-center px-4">
       <p className="font-[family-name:var(--font-display)] text-3xl text-[var(--ink)]">
-        Welcome
+        {APP_NAME}
       </p>
       <p className="mt-2 text-[var(--muted)]">
+        {APP_TAGLINE}
+      </p>
+      <p className="mt-3 text-sm text-[var(--muted)]">
         Sign in to save your travel profile. We’ll remember what you like — so the
         next trip doesn’t start from zero.
       </p>

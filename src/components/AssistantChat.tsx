@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
+import { APP_NAME, APP_TAGLINE } from "@/lib/brand";
 import type { RankedOption } from "@/lib/types/travel";
 
 type ChatMessage = {
@@ -150,10 +151,10 @@ export function AssistantChat({
         <div className="mx-auto flex max-w-3xl items-baseline justify-between gap-4 px-4 py-5">
           <div>
             <p className="font-[family-name:var(--font-display)] text-2xl tracking-tight text-[var(--ink)]">
-              Sahayatri
+              {APP_NAME}
             </p>
             <p className="mt-0.5 text-sm text-[var(--muted)]">
-              Personal travel assistant · India · existing market, best deals
+              {APP_TAGLINE}
             </p>
           </div>
           <div className="flex items-center gap-3">

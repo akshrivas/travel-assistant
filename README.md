@@ -1,6 +1,6 @@
-# Travel Assistant (V1 / M1)
+# TripSaathi (V1 / M1)
 
-Personal Travel Assistant — India beachhead.  
+Personal Travel Assistant — India beachhead. Installable as a PWA.  
 Spine: Understand → Stitch market → Shortlist → Enquire → Learn
 
 ## Local setup (recommended)

@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { APP_NAME } from "@/lib/brand";
 
 type Step = 1 | 2 | 3;
 
@@ -127,7 +128,10 @@ export function OnboardingWizard() {
 
   return (
     <div className="mx-auto flex min-h-[100dvh] max-w-lg flex-col px-4 py-10">
-      <p className="text-xs uppercase tracking-wider text-[var(--accent)]">
+      <p className="font-[family-name:var(--font-display)] text-xl text-[var(--ink)]">
+        {APP_NAME}
+      </p>
+      <p className="mt-1 text-xs uppercase tracking-wider text-[var(--accent)]">
         Step {step} of 3 · ~1 minute
       </p>
       <h1 className="mt-2 font-[family-name:var(--font-display)] text-3xl text-[var(--ink)]">
