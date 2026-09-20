@@ -1,4 +1,4 @@
-import { indiaCatalogAdapter } from "@/lib/adapters/india-catalog-adapter";
+import { webMarketAdapter } from "@/lib/adapters/web-market-adapter";
 import type { SourceAdapter } from "@/lib/adapters/types";
 import type { NormalizedTravelOption } from "@/lib/types/travel";
 import type { TravelEnquiryBrief } from "@/lib/types/travel";
@@ -6,7 +6,8 @@ import type { TravelEnquiryBrief } from "@/lib/types/travel";
 /** Beachhead market — config, not UI hardcode */
 export const DEFAULT_MARKET_FOCUS = process.env.MARKET_FOCUS || "IN";
 
-const adapters: SourceAdapter[] = [indiaCatalogAdapter];
+/** Real adapters only — no static invented catalog */
+const adapters: SourceAdapter[] = [webMarketAdapter];
 
 export function listAdapters(): SourceAdapter[] {
   return [...adapters];
@@ -25,6 +26,10 @@ export async function discoverOptions(
   brief: TravelEnquiryBrief,
   marketFocus: string = DEFAULT_MARKET_FOCUS,
 ): Promise<NormalizedTravelOption[]> {
+  if (!brief.destination && !brief.preferences?.vibe) {
+    return [];
+  }
+
   const eligible = adapters.filter(
     (a) => a.markets.length === 0 || a.markets.includes(marketFocus),
   );
@@ -52,10 +57,8 @@ export function dedupeOptions(
   for (const opt of options) {
     const key = [
       opt.destination.toLowerCase(),
+      opt.stay?.name?.toLowerCase().replace(/\s+/g, " ").trim() ?? "",
       opt.durationNights,
-      opt.stay?.name?.toLowerCase() ?? "",
-      opt.price.amount,
-      opt.price.currency,
     ].join("|");
 
     const existing = seen.get(key);
@@ -63,7 +66,6 @@ export function dedupeOptions(
       seen.set(key, opt);
       continue;
     }
-    // Prefer higher player rating / more reviews
     const score = (o: NormalizedTravelOption) =>
       (o.player?.rating ?? 0) * 1000 + (o.player?.reviewCount ?? 0);
     if (score(opt) > score(existing)) seen.set(key, opt);

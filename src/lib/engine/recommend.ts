@@ -86,17 +86,31 @@ export function recommendOptions(
       reasons.push("relaxed itinerary");
     }
 
-    // Reliability / feedback of market player
+    // Reliability / feedback — heavily weight best market players
     const rating = option.player?.rating ?? 0;
     const reviews = option.player?.reviewCount ?? 0;
-    score += rating * 4;
-    score += Math.min(10, Math.log10(reviews + 1) * 3);
-    if (rating >= 4.5 && reviews >= 200) {
-      reasons.push(
-        `${option.player?.name ?? "operator"} is well-reviewed (${rating}/5, ${reviews} reviews)`,
+    const platform = (option.player?.name || option.source.name || "").toLowerCase();
+    const majorPlatform =
+      /booking\.com|makemytrip|agoda|hotels\.com|goibibo|tripadvisor|official/.test(
+        platform,
       );
+    if (majorPlatform) score += 8;
+
+    score += rating * 5;
+    score += Math.min(14, Math.log10(reviews + 1) * 4);
+    if (rating >= 4.5 && reviews >= 200) {
+      score += 10;
+      reasons.push(
+        `top market pick (${rating}/5, ${reviews}+ reviews on ${option.player?.name ?? "listing"})`,
+      );
+    } else if (rating >= 4.2 && reviews >= 100) {
+      score += 6;
+      reasons.push(`strong reviews (${rating}/5, ${reviews} reviews)`);
     } else if (rating >= 4.0) {
-      reasons.push(`solid player rating ${rating}/5`);
+      reasons.push(`solid rating ${rating}/5`);
+    }
+    if (majorPlatform && !reasons.some((r) => r.includes("reviews"))) {
+      reasons.push(`listed on ${option.player?.name ?? "a major platform"}`);
     }
 
     // Stay quality
@@ -105,9 +119,13 @@ export function recommendOptions(
       reasons.push(`strong stay (${option.stay.rating})`);
     }
 
+    // Prefer real source URLs
+    if (option.source.url) score += 4;
+    else score -= 6;
+
     // Incomplete data penalty — honesty
     if (option.incompleteFields?.length) {
-      score -= option.incompleteFields.length * 2;
+      score -= option.incompleteFields.length * 3;
     }
 
     // Profile knowledge: slight boost when we know preferences
@@ -135,6 +153,11 @@ export function recommendOptions(
   };
 
   pickBy(() => true, "Best overall");
+  pickBy((r) => {
+    const reviews = r.option.player?.reviewCount ?? 0;
+    const rating = r.option.player?.rating ?? 0;
+    return reviews >= 100 && rating >= 4.2;
+  }, "Best reviewed");
   pickBy(
     (r) => (r.option.travelStyleTags ?? []).includes("relaxed"),
     "Relaxed",

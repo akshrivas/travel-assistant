@@ -101,10 +101,10 @@ export async function runAssistantTurn(input: {
   if (!options.length) {
     const vibe = brief.preferences?.vibe;
     const fallback = brief.destination
-      ? `I searched available India market sources for ${brief.destination}, but I don’t have strong options yet for that brief. Share a nearby destination or a flexible budget and I’ll try again — I won’t invent inventory.`
+      ? `Searched live India listings for ${brief.destination}, but nothing strong enough came back for that brief. Try a nearby area or a more flexible budget — I won’t invent inventory.`
       : vibe
-        ? `I can look for ${String(vibe)} trips in India — which destination are you leaning toward?`
-        : "Tell me where in India you’d like to go, roughly how many days, and your budget.";
+        ? `I can search live ${String(vibe)} stays in India — which destination are you leaning toward?`
+        : "Where in India, roughly how many days, and what’s the budget?";
     const reply = await craftAssistantReply({
       stage: "empty",
       brief,
@@ -150,34 +150,33 @@ function buildClarifyReply(
   missing: string[],
 ): string {
   const known: string[] = [];
-  if (profile.displayName) known.push(`I know you as ${profile.displayName}`);
-  if (profile.partyType) known.push(`you usually travel ${profile.partyType}`);
+  if (profile.partyType) known.push(`usually ${profile.partyType}`);
   if (profile.budgetMax) {
     known.push(
-      `your usual range is around ${formatPrice(profile.budgetMin ?? 0, profile.budgetCurrency ?? "INR")}–${formatPrice(profile.budgetMax, profile.budgetCurrency ?? "INR")}`,
+      `usual range ~${formatPrice(profile.budgetMin ?? 0, profile.budgetCurrency ?? "INR")}–${formatPrice(profile.budgetMax, profile.budgetCurrency ?? "INR")}`,
     );
   }
 
   const confLine =
     profile.knowledgeConfidence < 0.4
-      ? "You’re new to me — I need a couple of details to recommend well."
-      : "I already know some of what you usually prefer; I just need what’s missing for this trip.";
+      ? "Need a couple of details so I can search the live market properly."
+      : "Got your usual prefs — just need what’s missing for this trip.";
 
   const ask: string[] = [];
-  if (missing.includes("destination")) ask.push("Where in India do you want to go?");
+  if (missing.includes("destination")) ask.push("Where in India?");
   if (missing.includes("duration")) ask.push("How many days?");
   if (missing.includes("budget")) {
     ask.push(
       profile.budgetMax
-        ? "Is this trip within your usual budget, or a different amount this time?"
-        : "What’s your approximate budget for this trip?",
+        ? "Same budget band as usual, or different this time?"
+        : "Rough budget for this trip?",
     );
   }
 
   return [
     confLine,
-    known.length ? `So far: ${known.join("; ")}.` : null,
-    brief.destination ? `Destination noted: ${brief.destination}.` : null,
+    known.length ? `(${known.join("; ")}.)` : null,
+    brief.destination ? `${brief.destination} noted.` : null,
     ask.slice(0, 2).join(" "),
   ]
     .filter(Boolean)
@@ -209,10 +208,10 @@ function buildShortlistReply(
       : "";
 
   return [
-    `I compared ${totalFound} available options and shortlisted ${shortlist.length} strong deals ${who}${budgetNote}:`,
+    `Compared ${totalFound} live listings and shortlisted ${shortlist.length} strong picks ${who}${budgetNote}:`,
     "",
     ...lines,
     "",
-    "Prices are as reported by sources and subject to confirmation. Which one should I enquire about?",
+    "Prices/availability can change — confirm on the source link. Which one should I enquire about?",
   ].join("\n");
 }

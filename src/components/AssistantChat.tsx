@@ -38,8 +38,8 @@ export function AssistantChat({
 }) {
   const knowLine =
     knowledgeConfidence >= 0.45
-      ? `Hi ${userName} — I already know some of what you usually prefer. Tell me what you’re planning in India and I’ll shortlist suitable deals.`
-      : `Hi ${userName} — I’m your personal travel assistant. Tell me what you’re planning in India. I’ll compare available options and shortlist the best suitable deals for you.`;
+      ? "Ready when you are — tell me the trip and I’ll search live listings from major platforms, then shortlist the strongest fits."
+      : "Tell me where in India you’re headed, roughly how many days, and your budget. I’ll search live market listings and shortlist the best-reviewed options that fit.";
 
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
@@ -169,7 +169,7 @@ export function AssistantChat({
               </span>
             )}
             <p className="hidden text-xs text-[var(--muted)] sm:block">
-              Hi {userName}
+              {userName}
             </p>
             <a
               href="/profile"
@@ -227,11 +227,26 @@ export function AssistantChat({
                           </p>
                           <p className="mt-1 text-sm">{item.reason}</p>
                           <p className="mt-1 text-xs text-[var(--muted)]">
-                            Source: {item.option.source.name} · checked{" "}
+                            Source: {item.option.source.name}
+                            {item.option.player?.reviewCount
+                              ? ` · ${item.option.player.reviewCount} reviews`
+                              : ""}
+                            {" · "}
+                            checked{" "}
                             {new Date(
                               item.option.source.lastCheckedAt,
                             ).toLocaleString("en-IN")}
                           </p>
+                          {item.option.source.url ? (
+                            <a
+                              href={item.option.source.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="mt-1 inline-block text-xs text-[var(--accent)] underline underline-offset-2"
+                            >
+                              View listing
+                            </a>
+                          ) : null}
                         </div>
                         <div className="text-right">
                           <p className="font-[family-name:var(--font-display)] text-xl">
@@ -253,7 +268,9 @@ export function AssistantChat({
             </div>
           ))}
           {pending && (
-            <p className="text-sm text-[var(--muted)]">Comparing market options…</p>
+            <p className="text-sm text-[var(--muted)]">
+              Searching live market listings…
+            </p>
           )}
           {enquireMsg && (
             <p className="rounded-md border border-[var(--accent)]/30 bg-[var(--accent-soft)] px-3 py-2 text-sm">

@@ -19,22 +19,26 @@ export async function craftAssistantReply(input: {
   if (!isAiEnabled() || !openai) return input.fallback;
 
   try {
-    const system = `You are a warm, concise Personal Travel Assistant (India beachhead).
-Voice: helpful travel companion, not a salesperson. Customer benefit first.
-Rules:
-- Use the customer's name if known.
-- Reference what you already know about them when relevant (party type, pace, budget range, avoidances).
-- Distinguish "this trip" constraints from long-term prefs — don't imply one-off budget is permanent.
-- Never invent hotels, prices, or operators not in the provided shortlist/data.
-- For shortlist: briefly introduce why these ~3 fit THIS customer, then the structured cards will show details — keep prose tight (max ~120 words before they see cards).
-- For clarify: ask at most 2 missing things; sound smart not interrogative.
-- English replies.
-- No markdown tables. Light **bold** ok for option labels if helpful.`;
+    const system = `You are a sharp Personal Travel Assistant for India trips.
+Tone: natural chat with a knowledgeable friend who actually compared the live market — not a call-center script, not a brochure.
+
+Critical style rules:
+- NEVER open with "Hi {name}", "Hey {name}", or "{name}," on mid-flow turns.
+- Do NOT use the customer's first name unless they just introduced themselves or it adds clear warmth once in a long thread. Default: zero name usage.
+- Be specific to THIS trip + THEIR prefs (party, pace, budget, avoidances) without name-dropping.
+- Never invent hotels/prices/operators — only use provided shortlist data.
+- Prefer concrete comparisons: rating/reviews, platform, budget fit, vibe match.
+- Keep clarify asks to max 2 questions. No fluff.
+- Shortlist intro: 2–4 sentences on why these fit, then stop (cards show details). Max ~90 words.
+- Mention that prices/availability should be confirmed on the source link.
+- English. Light **bold** ok. No emojis.`;
 
     const payload = {
       stage: input.stage,
+      // Name available but model should almost never use it
+      customerFirstName: input.profile.displayName || null,
+      useName: false,
       customer: {
-        name: input.profile.displayName,
         home: input.profile.homeLocation,
         partyType: input.profile.partyType,
         usualBudget: [input.profile.budgetMin, input.profile.budgetMax],
@@ -52,8 +56,11 @@ Rules:
         stay: s.option.stay?.name,
         player: s.option.player?.name,
         rating: s.option.player?.rating,
+        reviews: s.option.player?.reviewCount,
+        reliability: s.option.player?.reliabilityNote,
         reason: s.reason,
         source: s.option.source.name,
+        url: s.option.source.url,
       })),
       totalFound: input.totalFound,
     };
@@ -61,20 +68,33 @@ Rules:
     const completion = await openai.chat.completions.create({
       model: defaultModel(),
       temperature: 0.5,
-      max_tokens: 350,
+      max_tokens: 280,
       messages: [
         { role: "system", content: system },
         {
           role: "user",
-          content: `Write the assistant chat message for this turn:\n${JSON.stringify(payload)}`,
+          content: `Write the next assistant message only (no preamble). Do not address the user by name:\n${JSON.stringify(payload)}`,
         },
       ],
     });
 
     const text = completion.choices[0]?.message?.content?.trim();
-    return text || input.fallback;
+    if (!text) return input.fallback;
+    return stripNameSpam(text, input.profile.displayName);
   } catch (err) {
     console.error("AI reply failed", err);
     return input.fallback;
   }
+}
+
+/** Soft guard if the model still greets by name mid-flow */
+function stripNameSpam(text: string, displayName?: string | null): string {
+  if (!displayName) return text;
+  const name = displayName.trim();
+  if (name.length < 2) return text;
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return text
+    .replace(new RegExp(`^(hi|hey|hello)\\s+${escaped}[,!.\\-–—]*\\s*`, "i"), "")
+    .replace(new RegExp(`^${escaped}[,!.\\-–—]\\s*`, "i"), "")
+    .trim();
 }

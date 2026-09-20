@@ -6,6 +6,9 @@ import { runAssistantTurn } from "@/lib/engine/assistant";
 import { prisma } from "@/lib/db";
 import type { TravelEnquiryBrief } from "@/lib/types/travel";
 
+/** Live web search can exceed default serverless limits */
+export const maxDuration = 60;
+
 const bodySchema = z.object({
   message: z.string().min(1).max(4000),
   conversationId: z.string().optional(),
