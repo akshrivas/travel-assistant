@@ -1,0 +1,179 @@
+// Travel Assistant V1 — Prisma schema
+// Conversation ≠ TravelRequest ≠ Recommendation ≠ Trip
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String?  @unique
+  name      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  profile       Profile?
+  conversations Conversation[]
+  requests      TravelRequest[]
+  trips         Trip[]
+  signals       BehaviourSignal[]
+}
+
+model Profile {
+  id                String   @id @default(cuid())
+  userId            String   @unique
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Basics
+  displayName       String?
+  homeLocation      String?
+  preferredLanguage String   @default("en")
+
+  // Travel defaults (long-term)
+  partyType         String? // solo | couple | family | friends
+  typicalDuration   Int?
+  budgetMin         Int?
+  budgetMax         Int?
+  budgetCurrency    String   @default("INR")
+  preferredDestinations String? // JSON array
+
+  // Preferences / avoidances (JSON)
+  preferencesJson   String   @default("{}")
+  avoidancesJson    String   @default("{}")
+
+  // Confidence: how well we know this customer (0-1)
+  knowledgeConfidence Float  @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Conversation {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  messages Message[]
+  requests TravelRequest[]
+}
+
+model Message {
+  id             String   @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  role           String // user | assistant | system
+  content        String
+  metadataJson   String? // structured extras
+  createdAt      DateTime @default(now())
+}
+
+model TravelRequest {
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversationId String?
+  conversation   Conversation? @relation(fields: [conversationId], references: [id])
+
+  // Structured understanding
+  intent         String?
+  destination    String?
+  datesText      String?
+  durationDays   Int?
+  travellers     Int?
+  partyType      String?
+  budgetMin      Int?
+  budgetMax      Int?
+  budgetCurrency String   @default("INR")
+  travelStyle    String?
+  preferencesJson String  @default("{}")
+  constraintsJson String  @default("{}")
+  confidence     Float    @default(0)
+  missingJson    String   @default("[]")
+  rawBrief       String?
+
+  // Trip-scoped only (must NOT auto-write to Profile)
+  temporaryJson  String   @default("{}")
+
+  status         String   @default("open") // open | shortlisted | enquired | closed
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  recommendations Recommendation[]
+  enquiries       Enquiry[]
+  trip            Trip?
+}
+
+model Recommendation {
+  id              String   @id @default(cuid())
+  travelRequestId String
+  travelRequest   TravelRequest @relation(fields: [travelRequestId], references: [id], onDelete: Cascade)
+  optionsJson     String // NormalizedTravelOption[] shortlist
+  reasonsJson     String // parallel reasons
+  createdAt       DateTime @default(now())
+}
+
+model Enquiry {
+  id              String   @id @default(cuid())
+  travelRequestId String
+  travelRequest   TravelRequest @relation(fields: [travelRequestId], references: [id], onDelete: Cascade)
+  optionId        String
+  optionSnapshot  String // JSON of selected TravelOption
+  status          String   @default("pending") // pending | quoted | confirmed | closed
+  providerRef     String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  trip Trip?
+}
+
+model Trip {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  travelRequestId String?  @unique
+  travelRequest   TravelRequest? @relation(fields: [travelRequestId], references: [id])
+  enquiryId       String?  @unique
+  enquiry         Enquiry? @relation(fields: [enquiryId], references: [id])
+
+  destination     String?
+  datesText       String?
+  status          String   @default("confirmed")
+  servicesJson    String   @default("[]")
+  // itinerary/documents only if source provided
+  itineraryJson   String?
+  documentsJson   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  feedback Feedback?
+}
+
+model Feedback {
+  id           String   @id @default(cuid())
+  tripId       String   @unique
+  trip         Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  ratingsJson  String   @default("{}")
+  likedJson    String   @default("[]")
+  dislikedJson String   @default("[]")
+  notes        String?
+  createdAt    DateTime @default(now())
+}
+
+// Explicit V1 behaviour signals only: search | view | save
+model BehaviourSignal {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String // search | view | save
+  payloadJson String @default("{}")
+  createdAt DateTime @default(now())
+}

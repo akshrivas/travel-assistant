@@ -1,0 +1,319 @@
+[
+  {
+    "externalId": "kashmir-family-relaxed-1",
+    "destination": "Kashmir",
+    "region": "Jammu & Kashmir",
+    "country": "IN",
+    "durationNights": 5,
+    "durationDays": 6,
+    "stay": {
+      "name": "Dal View Family Stay",
+      "type": "hotel",
+      "rating": 4.2,
+      "location": "Srinagar"
+    },
+    "transport": {
+      "mode": "flight+cab",
+      "summary": "Delhi–Srinagar flights + local cabs"
+    },
+    "activities": ["Dal Lake shikara", "Gulmarg day trip", "local food walk"],
+    "price": {
+      "amount": 62000,
+      "currency": "INR",
+      "perPerson": false,
+      "inclusionsNote": "Stay + breakfast + 2 sightseeing days"
+    },
+    "inclusions": ["5N stay", "Breakfast", "2 day sightseeing", "Airport transfers"],
+    "exclusions": ["Flights optional add-on", "Lunch/dinner", "Adventure sports"],
+    "cancellation": "Free cancellation up to 7 days before start",
+    "player": {
+      "name": "Valley Trails Co.",
+      "rating": 4.6,
+      "reviewCount": 412,
+      "reliabilityNote": "Strong family-trip feedback"
+    },
+    "travelStyleTags": ["relaxed", "family", "nature"]
+  },
+  {
+    "externalId": "kashmir-balanced-2",
+    "destination": "Kashmir",
+    "region": "Jammu & Kashmir",
+    "country": "IN",
+    "durationNights": 5,
+    "durationDays": 6,
+    "stay": {
+      "name": "Gulmarg Meadow Lodge",
+      "type": "hotel",
+      "rating": 4.0,
+      "location": "Gulmarg / Srinagar mix"
+    },
+    "transport": {
+      "mode": "flight+cab",
+      "summary": "Shared transfers + private day cab"
+    },
+    "activities": ["Gulmarg gondola", "Pahalgam", "Mughal gardens"],
+    "price": {
+      "amount": 55000,
+      "currency": "INR",
+      "perPerson": false
+    },
+    "inclusions": ["5N stay", "Breakfast", "Sightseeing as per itinerary"],
+    "exclusions": ["Flights", "Personal expenses"],
+    "cancellation": "Partial refund up to 10 days before",
+    "player": {
+      "name": "Himalayan Circuit",
+      "rating": 4.4,
+      "reviewCount": 890,
+      "reliabilityNote": "High volume, consistent ratings"
+    },
+    "travelStyleTags": ["balanced", "family", "nature"]
+  },
+  {
+    "externalId": "kashmir-value-3",
+    "destination": "Kashmir",
+    "region": "Jammu & Kashmir",
+    "country": "IN",
+    "durationNights": 5,
+    "durationDays": 6,
+    "stay": {
+      "name": "Srinagar Comfort Inn",
+      "type": "hotel",
+      "rating": 3.8,
+      "location": "Srinagar"
+    },
+    "transport": { "mode": "cab", "summary": "Local cabs for sightseeing" },
+    "activities": ["City highlights", "Optional Gulmarg"],
+    "price": {
+      "amount": 48000,
+      "currency": "INR",
+      "perPerson": false
+    },
+    "inclusions": ["5N stay", "Breakfast", "1 shared sightseeing day"],
+    "exclusions": ["Flights", "Most activities"],
+    "cancellation": "Non-refundable within 14 days",
+    "player": {
+      "name": "Budget Valley Stays",
+      "rating": 4.1,
+      "reviewCount": 220,
+      "reliabilityNote": "Good value; fewer inclusions"
+    },
+    "travelStyleTags": ["value", "experience", "budget"]
+  },
+  {
+    "externalId": "goa-couple-relaxed-1",
+    "destination": "Goa",
+    "region": "Goa",
+    "country": "IN",
+    "durationNights": 4,
+    "durationDays": 5,
+    "stay": {
+      "name": "Calm Coast Boutique",
+      "type": "hotel",
+      "rating": 4.5,
+      "location": "South Goa"
+    },
+    "transport": { "mode": "flight+transfer", "summary": "Airport transfers included" },
+    "activities": ["Beach time", "Sunset cruise", "Cafe hopping"],
+    "price": {
+      "amount": 45000,
+      "currency": "INR",
+      "perPerson": false
+    },
+    "inclusions": ["4N stay", "Breakfast", "Airport transfers", "1 activity"],
+    "exclusions": ["Flights", "Water sports"],
+    "cancellation": "Free cancellation up to 5 days before",
+    "player": {
+      "name": "Konkan Escapes",
+      "rating": 4.7,
+      "reviewCount": 650,
+      "reliabilityNote": "Top-rated for couples / honeymoon"
+    },
+    "travelStyleTags": ["relaxed", "couple", "honeymoon", "beach"]
+  },
+  {
+    "externalId": "goa-family-balanced-2",
+    "destination": "Goa",
+    "region": "Goa",
+    "country": "IN",
+    "durationNights": 5,
+    "durationDays": 6,
+    "stay": {
+      "name": "Family Bay Resort",
+      "type": "resort",
+      "rating": 4.3,
+      "location": "North Goa"
+    },
+    "transport": { "mode": "flight+cab", "summary": "Private transfers" },
+    "activities": ["Beach", "Fort Aguada", "Kid-friendly pools"],
+    "price": {
+      "amount": 70000,
+      "currency": "INR",
+      "perPerson": false
+    },
+    "inclusions": ["5N stay", "Breakfast", "Transfers", "1 family activity"],
+    "exclusions": ["Flights", "Alcohol"],
+    "cancellation": "Free cancellation up to 7 days before",
+    "player": {
+      "name": "Coastal Family Holidays",
+      "rating": 4.5,
+      "reviewCount": 510,
+      "reliabilityNote": "Strong family reviews"
+    },
+    "travelStyleTags": ["balanced", "family", "beach"]
+  },
+  {
+    "externalId": "goa-value-3",
+    "destination": "Goa",
+    "region": "Goa",
+    "country": "IN",
+    "durationNights": 3,
+    "durationDays": 4,
+    "stay": {
+      "name": "Baga Stay House",
+      "type": "hotel",
+      "rating": 3.9,
+      "location": "Baga"
+    },
+    "transport": { "mode": "self", "summary": "No transfers included" },
+    "activities": ["Beaches nearby"],
+    "price": {
+      "amount": 22000,
+      "currency": "INR",
+      "perPerson": false
+    },
+    "inclusions": ["3N stay", "Breakfast"],
+    "exclusions": ["Transfers", "Activities", "Flights"],
+    "cancellation": "24h free cancel",
+    "player": {
+      "name": "Goa Quick Stays",
+      "rating": 4.0,
+      "reviewCount": 180,
+      "reliabilityNote": "Fine for short budget trips"
+    },
+    "travelStyleTags": ["value", "budget", "beach"]
+  },
+  {
+    "externalId": "rajasthan-family-1",
+    "destination": "Rajasthan",
+    "region": "Rajasthan",
+    "country": "IN",
+    "durationNights": 6,
+    "durationDays": 7,
+    "stay": {
+      "name": "Jaipur–Udaipur Circuit Hotels",
+      "type": "hotel",
+      "rating": 4.1,
+      "location": "Jaipur & Udaipur"
+    },
+    "transport": { "mode": "train+cab", "summary": "Intercity transfers included" },
+    "activities": ["Amber Fort", "City Palace", "Lake Pichola"],
+    "price": {
+      "amount": 78000,
+      "currency": "INR",
+      "perPerson": false
+    },
+    "inclusions": ["6N stay", "Breakfast", "Sightseeing cabs", "Guide for key forts"],
+    "exclusions": ["Flights/trains tickets optional", "Dinner"],
+    "cancellation": "Free cancellation up to 10 days before",
+    "player": {
+      "name": "Desert Heritage Tours",
+      "rating": 4.6,
+      "reviewCount": 1200,
+      "reliabilityNote": "Established circuit operator"
+    },
+    "travelStyleTags": ["balanced", "family", "culture"]
+  },
+  {
+    "externalId": "kerala-relaxed-1",
+    "destination": "Kerala",
+    "region": "Kerala",
+    "country": "IN",
+    "durationNights": 5,
+    "durationDays": 6,
+    "stay": {
+      "name": "Backwater & Hills Combo",
+      "type": "resort",
+      "rating": 4.4,
+      "location": "Alleppey + Munnar"
+    },
+    "transport": { "mode": "cab", "summary": "Private cab for circuit" },
+    "activities": ["Houseboat night", "Tea gardens", "Ayurveda optional"],
+    "price": {
+      "amount": 68000,
+      "currency": "INR",
+      "perPerson": false
+    },
+    "inclusions": ["5N stay", "1N houseboat", "Breakfast", "Private cab"],
+    "exclusions": ["Flights", "Ayurveda treatments"],
+    "cancellation": "Free cancellation up to 7 days before",
+    "player": {
+      "name": "Malabar Quiet Trails",
+      "rating": 4.8,
+      "reviewCount": 740,
+      "reliabilityNote": "Excellent for relaxed / nature trips"
+    },
+    "travelStyleTags": ["relaxed", "nature", "couple", "family"]
+  },
+  {
+    "externalId": "manali-adventure-1",
+    "destination": "Manali",
+    "region": "Himachal Pradesh",
+    "country": "IN",
+    "durationNights": 4,
+    "durationDays": 5,
+    "stay": {
+      "name": "Pine Slope Stay",
+      "type": "hotel",
+      "rating": 4.0,
+      "location": "Manali"
+    },
+    "transport": { "mode": "volvo+cab", "summary": "Delhi Volvo + local cab" },
+    "activities": ["Solang", "Hadimba", "Optional paragliding"],
+    "price": {
+      "amount": 35000,
+      "currency": "INR",
+      "perPerson": false
+    },
+    "inclusions": ["4N stay", "Breakfast", "Local sightseeing"],
+    "exclusions": ["Adventure fees", "Flights"],
+    "cancellation": "Free cancellation up to 5 days before",
+    "player": {
+      "name": "Hill Quest Adventures",
+      "rating": 4.3,
+      "reviewCount": 980,
+      "reliabilityNote": "Popular for young / adventure travellers"
+    },
+    "travelStyleTags": ["experience", "adventure", "value"]
+  },
+  {
+    "externalId": "jaipur-weekend-1",
+    "destination": "Jaipur",
+    "region": "Rajasthan",
+    "country": "IN",
+    "durationNights": 2,
+    "durationDays": 3,
+    "stay": {
+      "name": "Pink City Heritage Hotel",
+      "type": "hotel",
+      "rating": 4.2,
+      "location": "Jaipur"
+    },
+    "transport": { "mode": "self", "summary": "No transfers" },
+    "activities": ["City palace", "Local bazaars"],
+    "price": {
+      "amount": 18000,
+      "currency": "INR",
+      "perPerson": false
+    },
+    "inclusions": ["2N stay", "Breakfast"],
+    "exclusions": ["Transport", "Guides"],
+    "cancellation": "Free cancellation 48h before",
+    "player": {
+      "name": "Rajput Stay Network",
+      "rating": 4.4,
+      "reviewCount": 300,
+      "reliabilityNote": "Solid short-break option"
+    },
+    "travelStyleTags": ["balanced", "culture", "weekend"]
+  }
+]
